@@ -8,6 +8,8 @@ param(
 $ErrorActionPreference = 'Continue'   # native tools write progress to stderr; exit codes are checked instead
 $root = Split-Path $PSScriptRoot -Parent
 $pio  = "$env:USERPROFILE\.platformio\penv\Scripts\pio.exe"
+# esptool prints Unicode progress bars; in a cp1251 console PIO's output thread crashes and the upload hangs
+$env:PYTHONUTF8 = '1'; $env:PYTHONIOENCODING = 'utf-8'
 $bin  = "$root\.pio\build\esp32-s3-zero\firmware.bin"
 $auth = if ($Pass) { @('-u', "admin:$Pass") } else { @() }
 
