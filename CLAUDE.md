@@ -12,6 +12,7 @@ Public repo: github.com/san40pan40/p5-portal (MIT). Plan / roadmap: `TODO.md` �
 - GitHub CLI: `gh` (Windows: `C:\Program Files\GitHub CLI\gh.exe`), logged in as the repo owner.
 - Keep changes small and in the existing style; no new libraries without asking.
 - Docs (README, TODO, CLAUDE.md, release notes) and code comments: **ASD-STE100 Simplified Technical English** — always use the `/asd-ste100` skill when writing them. If the skill is not available: short sentences (≤ 20 words for instructions, ≤ 25 for descriptions), active voice, imperative for instructions, one topic per sentence, one meaning per word, no idioms.
+- **CHANGELOG.md** (Keep a Changelog): add every user-visible change to `## [Unreleased]` in the same commit. Before a version tag, rename Unreleased to `## [X.Y.Z] - date`. The release workflow uses that section as the release notes (Markdown, one item per line — never one long line).
 - When the user states a lasting rule or preference ("from now on", "always", tooling, language, workflow), record it here in Rules right away.
 
 ## Decisions (keep unless the user changes them)
