@@ -29,3 +29,8 @@ function e(){if(g)P+='<path class="a c'+i+'" d="M'+sx+' 100'+g+'L'+ex+' 100Z"/><
 a.forEach(function(x,n){if(x==null)return e();if(!g)sx=o+n;ex=o+n;g+='L'+ex+' '+(100-(x-lo)/(hi-lo)*100).toFixed(1)});e();
 hd+='<b class=c'+i+'>'+(L[i]?L[i]+': ':'')+(cur==null?'—':cur)+'</b>'});
 c.innerHTML='<div class=chh><span>'+c.dataset.t+'</span><span>'+hd+'</span></div><svg viewBox="0 0 359 100" preserveAspectRatio=none>'+P+'</svg><div class="chh chf"><span>'+d.a+'</span><span>'+(v.length?'↓'+mn+' ↑'+mx:'')+'</span><span>'+d.b+'</span></div>'}
+// Online firmware update (#fw, Settings): while a job runs poll /api/update, reload when it ends.
+// #fwr = firmware installed: restart through the normal restart page.
+var F=document.getElementById('fw');
+if(F&&F.dataset.r)setInterval(function(){fetch('/api/update',{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){if(j.state!='run')location.reload();else{var p=F.querySelector('[data-p]');if(p)p.textContent=j.progress+'%'}},function(){})},1000);
+if(document.getElementById('fwr'))document.getElementById('fwr').submit();

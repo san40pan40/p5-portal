@@ -6,6 +6,7 @@
 #include "app_config.h"
 #include "app_network.h"
 #include "app_board.h"
+#include "net_fetch.h"
 #include "version_gen.h"
 
 using Config::settings;
@@ -128,6 +129,90 @@ static void netsCard(String &b) {
   b += "</section>";
 }
 
+// ---------------------------------------------------------------- online update (GitHub releases)
+// NetFetch runs the HTTPS job in its own task; the page shows its status, app.js polls /api/update
+// while a job runs (#fw[data-r]) and reloads when it ends. #fwr (installed) is submitted by app.js.
+static String fwErrText(const NetFetch::Status &st) {
+  using namespace NetFetch;
+  switch (st.err) {
+    case E_BUSY:    return T(FW_E_BUSY);
+    case E_HEAP:    return T(FW_E_HEAP) + String(st.code) + T(ST_KB);
+    case E_TASK:    return T(FW_E_TASK);
+    case E_CONNECT: return T(FW_E_CONNECT) + String("(") + st.detail + ")";
+    case E_HTTP:    return T(FW_E_HTTP) + String(st.code);
+    case E_SIZE:    return T(FW_E_SIZE);
+    case E_TOO_BIG: return T(FW_E_TOO_BIG) + String(st.code) + T(ST_KB);
+    case E_TIMEOUT: return T(FW_E_TIMEOUT);
+    case E_FLASH:   return T(FW_E_FLASH) + String(st.detail);
+    default:        return "";
+  }
+}
+
+// "v1.2.3" -> true; anything else (e.g. "v1.2.3-4-gabc", "dev") is not a clean release tag
+static bool parseVer(const char *v, unsigned (&n)[3]) {
+  if (*v == 'v' || *v == 'V') v++;
+  int used = 0;
+  return isdigit((unsigned char)*v) && sscanf(v, "%u.%u.%u%n", &n[0], &n[1], &n[2], &used) == 3 && !v[used];
+}
+
+// 1 = latest is newer, 0 = same or older, -1 = not comparable (install is offered anyway)
+static int fwNewer(const char *latest) {
+  unsigned a[3], b[3];
+  if (!parseVer(latest, a) || !parseVer(FW_VERSION, b)) return -1;
+  for (int i = 0; i < 3; i++)
+    if (a[i] != b[i]) return a[i] > b[i];
+  return 0;
+}
+
+static void fwBlock(String &b) {
+  using namespace NetFetch;
+  const Status st = status();
+  const bool run = st.state == RUNNING, inst = st.job == JOB_FW_INSTALL;
+  b += String("<div id=fw") + (run ? " data-r=1>" : ">");
+  if (run && inst) {
+    b += String("<p class=hint>") + T(FW_INSTALLING) + "<b data-p>" + st.progress + "%</b></p>";
+  } else if (run) {
+    b += String("<p class=hint>") + T(FW_CHECKING) + "</p>";
+  } else if (st.state == DONE && inst) {
+    b += String("<p class=ok>") + T(FW_INSTALLED) + "</p><form id=fwr method=POST action='/reboot'><button>" +
+         T(ST_REBOOT) + "</button></form>";
+  } else if (st.state == DONE && !st.latest[0]) {
+    b += String("<p class=hint>") + T(FW_NO_REL) + "</p>";
+  } else if (st.state == DONE) {
+    const int nw = fwNewer(st.latest);
+    b += String("<p class=hint>") + T(FW_LATEST) + "<b>" + esc(st.latest) + "</b> " +
+         (nw == 1 ? tag(T(FW_NEWER), "warn") : nw == 0 ? tag(T(FW_UPTODATE), "ok") : String()) + "</p>";
+    if (nw != 0)
+      b += "<div class=actions>" + postBtn("/fw/install", T(FW_INSTALL_BTN), "", nullptr, "", T(FW_INSTALL_CONFIRM)) + "</div>";
+  } else if (st.state == FAILED) {
+    b += String("<p class=bad>") + esc(inst ? T(OTA_FAIL) + fwErrText(st) + T(OTA_OLD_RUNS) : T(FW_CHECK_FAIL) + fwErrText(st)) + "</p>";
+  }
+  b += "</div>";
+}
+
+static void fwStart(NetFetch::Job job) {
+  // Other refusals (low RAM...) are kept in the status and shown in the System card
+  if (NetFetch::start(job) == NetFetch::E_BUSY) return sendError(T(FW_E_BUSY), "/config");
+  server.sendHeader("Location", "/config#sys", true);
+  server.send(303, "text/plain", "");
+}
+static void handleFwCheck()   { fwStart(NetFetch::JOB_FW_CHECK); }
+static void handleFwInstall() { fwStart(NetFetch::JOB_FW_INSTALL); }
+
+// GET /api/update: {state: idle|run|done|fail, job, latest, progress, error}
+static void handleApiUpdate() {
+  using namespace NetFetch;
+  const Status st = status();
+  static const char *const STATE[] = {"idle", "run", "done", "fail"};
+  String err = st.state == FAILED ? fwErrText(st) : String();
+  err.replace("\\", "\\\\");
+  err.replace("\"", "\\\"");
+  String j = String("{\"state\":\"") + STATE[st.state] + "\",\"job\":\"" +
+             (st.job == JOB_FW_INSTALL ? "install" : st.job == JOB_FW_CHECK ? "check" : "") + "\",\"latest\":\"" +
+             st.latest + "\",\"progress\":" + st.progress + ",\"error\":\"" + err + "\"}";
+  server.send(200, "application/json", j);
+}
+
 static void handleConfig() {
   const Config::Settings &s = settings;
   // While a scan runs the page reloads itself until the results are in
@@ -150,13 +235,15 @@ static void handleConfig() {
   flushPage(b);
 
   // System: firmware info, OTA (file upload form), reboot, password recovery
-  b += card(I18n::CF_SYS_CARD) + "<p class=hint>" + T(CF_OTA_BUILD) + "<b>" FW_VERSION "</b> (" __DATE__ ")" + T(CF_OTA_FREE) +
-       String(ESP.getFreeSketchSpace() / 1024) + T(ST_KB) + ".</p>"
-       "<form method=POST action='/update' enctype='multipart/form-data' "
-       "onsubmit=\"this.querySelector('button').disabled=true;this.querySelector('span').textContent='" +
+  b += String("<section class=card id=sys><h3>") + T(CF_SYS_CARD) + "</h3><p class=hint>" + T(CF_OTA_BUILD) +
+       "<b>" FW_VERSION "</b> (" __DATE__ ")" + T(CF_OTA_FREE) + String(ESP.getFreeSketchSpace() / 1024) + T(ST_KB) + ".</p>";
+  fwBlock(b);
+  b += String("<form method=POST action='/update' enctype='multipart/form-data' "
+              "onsubmit=\"this.querySelector('button').disabled=true;this.querySelector('span').textContent='") +
        T(CF_OTA_UPLOADING) + "'\"><div class=row><input type=file name=fw accept='.bin' required><button>" +
        T(CF_OTA_BTN) + "</button><span class=hint></span></div></form><p class=hint>" + T(CF_OTA_HINT) + "</p>" +
-       "<div class=actions>" + postBtn("/reboot", T(ST_REBOOT), "r", nullptr, "", T(ST_REBOOT_CONFIRM)) + "</div>" +
+       "<div class=actions>" + (NetFetch::busy() ? String() : postBtn("/fw/check", T(FW_CHECK_BTN), "g")) +
+       postBtn("/reboot", T(ST_REBOOT), "r", nullptr, "", T(ST_REBOOT_CONFIRM)) + "</div>" +
        "<details><summary>" + T(CF_FORGOT_CARD) + "</summary><p class=hint>" + T(CF_FORGOT_1) + "<code>" +
        Config::DEFAULT_AP_SSID + "</code> / <code>" + Config::DEFAULT_AP_PASS + "</code>" + T(CF_FORGOT_2) +
        "</p><p class=hint>" + T(CF_FORGOT_3) + "</p></details></section>";
@@ -260,6 +347,7 @@ static void handleUpdateUpload() {
     s_otaError = "";
     s_otaAllowed = accessOk();
     if (!s_otaAllowed) return;
+    if (NetFetch::busy()) { s_otaError = T(FW_E_BUSY); return; }   // an online update may be writing
     Serial.printf("[OTA] start: %s\n", u.filename.c_str());
     Board::setLed(30, 0, 40);                     // purple: update in progress
     if (!Update.begin(UPDATE_SIZE_UNKNOWN)) s_otaError = Update.errorString();
@@ -294,6 +382,9 @@ void registerConfigPage() {
   route("/save/ap",  HTTP_POST, handleSaveAp);
   route("/save/web", HTTP_POST, handleSaveWeb);
   routeUpload("/update", handleUpdateDone, handleUpdateUpload);
+  route("/fw/check",   HTTP_POST, handleFwCheck);
+  route("/fw/install", HTTP_POST, handleFwInstall);
+  route("/api/update", HTTP_GET,  handleApiUpdate);
 }
 
 }  // namespace Web
