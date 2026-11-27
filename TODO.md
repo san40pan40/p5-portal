@@ -19,7 +19,6 @@
    - panel: toggle a list on → download to LittleFS; off → delete; daily update check
    - lookup: binary search in the flash file (≈ 150k domains fit), user list stays in RAM
    - record source + license of each list in `index.json`
-3. **More languages** — `lang/xx.json` in the repo, downloadable from the panel (keys = ids in `i18n_strings.h`)
 
 ## Ideas / known gaps
 - DNS over TCP (large answers > 1232 bytes)

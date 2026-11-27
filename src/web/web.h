@@ -77,7 +77,7 @@ String ruleIo(const char *page);                 // export link + import form (p
 void finishToggle(const char *page, bool on, const char *onMsg, const char *offMsg);  // save + redirect
 
 // ---- Formatting ----
-String      fmtDur(uint32_t seconds);            // 93784 -> "1д 2г 3хв"
+String      fmtDur(uint32_t seconds);            // 93784 -> "1d 2h 3m"
 uint32_t    pct(uint32_t part, uint32_t total);  // 64-bit safe percentage
 const char *rssiText(int rssi);
 const char *rssiClass(int rssi);

@@ -75,9 +75,7 @@ void beginPage(const char *title, const char *active, int code, const char *extr
   server.send(code, "text/html; charset=utf-8", "");
   String h;
   h.reserve(1200);
-  h += "<!DOCTYPE html><html lang=";
-  h += T(LANG_CODE);
-  h += "><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>";
+  h += "<!DOCTYPE html><html lang=en><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>";
   h += extraHead;
   h += "<title>";
   h += title;
@@ -94,14 +92,7 @@ void beginPage(const char *title, const char *active, int code, const char *extr
   h += "</span><span class=chip>";
   h += T(HDR_CLIENTS);
   h += "<span data-k=cl>" + String(WiFi.softAPgetStationNum()) + "</span></span>";
-  // Quick language switch: shows the other language, returns to the same page
-  h += "<form class=i method=POST action='/lang'><input type=hidden name=back value='";
-  h += active;
-  h += "'><button class='g s' name=l value='";
-  h += I18n::lang() == I18n::Lang::EN ? "uk" : "en";
-  h += "'>";
-  h += T(LANG_SWITCH);
-  h += "</button></form></div><nav>";
+  h += "</div><nav>";
 
   static const struct { const char *path; I18n::Str label; } MENU[] = {
     {"/", I18n::MENU_STATUS}, {"/dns", I18n::MENU_FILTER}, {"/bypass", I18n::MENU_GUARD}, {"/config", I18n::MENU_SETTINGS},
@@ -154,6 +145,7 @@ String fetchErrText(const NetFetch::Status &st) {
     case E_SPACE:    return T(FW_E_SPACE) + String(st.code) + T(FW_E_SPACE_FREE) + st.detail + T(FW_E_SPACE_OFF);
     case E_BAD_FILE: return T(FW_E_BAD_FILE);
     case E_FS:       return T(FW_E_FS);
+    case E_MEM:      return T(FW_E_MEM);
     default:         return "";
   }
 }
@@ -373,17 +365,6 @@ String ruleIo(const char *page) {
          page + "/export'>" + T(LIST_EXPORT) + "</a></div></details>";
 }
 
-// Language switch (header button or Settings): takes effect at once, no restart
-static void handleLang() {
-  I18n::Lang l;
-  if (I18n::parseLang(server.arg("l"), l)) {
-    I18n::setLang(l);
-    Config::settings.lang = l;
-    Config::save();
-  }
-  redirectBack("/", T(LANG_CHANGED));
-}
-
 void finishToggle(const char *page, bool on, const char *onMsg, const char *offMsg) {
   Config::save();
   redirectMsg(page, on ? onMsg : offMsg);
@@ -426,7 +407,6 @@ void begin() {
   registerDnsPage();
   registerGuardPage();
   registerConfigPage();
-  route("/lang", HTTP_POST, handleLang);
   server.on("/style.css", HTTP_GET, handleCss);   // styles and script: no password needed, nothing secret
   server.on("/app.js",    HTTP_GET, handleJs);
   server.onNotFound([]() { server.send(404, "text/plain", "404"); });

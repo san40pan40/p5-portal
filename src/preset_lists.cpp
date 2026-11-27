@@ -1,6 +1,7 @@
 #include "preset_lists.h"
 #include <LittleFS.h>
 #include <Preferences.h>
+#include <esp_heap_caps.h>
 #include "app_network.h"      // Net::internetOk() — downloads only while the internet is up
 
 namespace PresetLists {
@@ -16,7 +17,8 @@ struct Meta {                                         // one entry of index.json
 
 struct List {
   Meta     m;
-  bool     enabled, want, failed;                    // want = download queued
+  bool     enabled, want, failed;                    // want = download queued. failed = show err.
+  uint32_t retryAt;                                   // failed: millis() of the next try
   NetFetch::Status err;                               // why the last download failed
   uint8_t  *hs;                                       // all hashes (es bytes each, LE), PSRAM; null = not active
   uint32_t count, crc, bytes;                         // of the local file
@@ -87,11 +89,13 @@ static void closeList(List &l) {
   l.count = 0;
 }
 
-// Loads /bl/<id>.bin into PSRAM. A broken file is deleted (it is downloaded again).
-static bool openList(List &l) {
+// Loads /bl/<id>.bin into a new PSRAM buffer, then frees the old buffer of the list.
+// On failure the old buffer stays active. It deletes a broken file (the list downloads it again).
+// Returns E_NONE, E_FS (no file or a bad file) or E_MEM (no PSRAM for the new buffer).
+static NetFetch::Err openList(List &l) {
   char p[40];
   path(p, l, "bin");
-  if (!LittleFS.exists(p)) return false;
+  if (!LittleFS.exists(p)) return NetFetch::E_FS;
   const uint32_t t0 = millis();
   File f = LittleFS.open(p, "r");
   uint8_t h[HDR_SIZE];
@@ -101,24 +105,27 @@ static bool openList(List &l) {
     Serial.printf("[BL] %s: bad file, deleted\n", p);
     f.close();
     LittleFS.remove(p);
-    return false;
+    return NetFetch::E_FS;
   }
   uint8_t *hs = (uint8_t *)ps_malloc(cnt * es);
+  NetFetch::Err e = hs ? NetFetch::E_NONE : NetFetch::E_MEM;
   if (hs && f.read(hs, cnt * es) != cnt * es) {
     free(hs);
-    hs = nullptr;
+    e = NetFetch::E_FS;
   }
-  l.bytes = f.size();
+  const uint32_t bytes = f.size();
   f.close();
-  if (!hs) return false;
+  if (e != NetFetch::E_NONE) return e;
+  if (l.hs) free(l.hs);                               // swap: the new data replaces the old data
+  else s_open++;
   l.hs = hs;
   l.count = cnt;
   l.crc = crc;
   l.es = es;
-  s_open++;
+  l.bytes = bytes;
   Serial.printf("[BL] %s: %u hashes loaded in %u ms, PSRAM free %u\n", l.m.id, (unsigned)cnt,
                 (unsigned)(millis() - t0), (unsigned)ESP.getFreePsram());
-  return true;
+  return NetFetch::E_NONE;
 }
 
 // h = FNV-1a 64; a 48-bit list stores (h ^ h >> 48) & 0xFFFFFFFFFFFF (see build_lists.py)
@@ -283,7 +290,7 @@ static void saveEnabled() {
 void begin() {
   LittleFS.mkdir("/bl");
   for (const Meta &b : BUILTIN) L[s_n++].m = b;
-  parseIndex();
+  // Add the enabled ids first. Then a full index.json cannot push an enabled list out of the table.
   Preferences pr;
   pr.begin("portal", true);
   String v = pr.getString("bl", "");
@@ -295,13 +302,14 @@ void begin() {
     if (i >= 0) L[i].enabled = true;
     a = b + 1;
   }
+  parseIndex();
   char p[40];
   for (int i = 0; i < s_n; i++) {
     List &l = L[i];
     path(p, l, "tmp");
     LittleFS.remove(p);                               // a download cut off by a reboot
     if (l.enabled) {
-      l.want = !openList(l);
+      l.want = openList(l) != NetFetch::E_NONE;
       s_checkDue = true;
     } else {
       path(p, l, "bin");
@@ -335,7 +343,7 @@ uint32_t setEnabled(int i, bool on) {
 Info info(int i) {
   const List &l = L[i];
   Info r{l.m.id, l.m.name, l.m.license, l.m.homepage, l.m.updated, OFF, l.hs ? l.count : l.m.count,
-         l.hs ? l.bytes : l.m.bytes, 0, l.err};
+         l.hs ? l.bytes : l.m.bytes, 0, l.hs != nullptr, l.err};
   if (!l.enabled) r.state = OFF;
   else if (s_job == NetFetch::JOB_LIST_FETCH && s_cur == i) {
     r.state = LOADING;
@@ -346,24 +354,44 @@ Info info(int i) {
   return r;
 }
 
+uint32_t stateCode() {
+  uint32_t c = busy();
+  for (int i = 0; i < s_n; i++) c = c << 3 | info(i).state;
+  return c;
+}
+
+bool pending() {
+  for (int i = 0; i < s_n; i++) {
+    const State st = info(i).state;
+    if (st == QUEUED || st == LOADING) return true;
+  }
+  return busy();
+}
+
 // ================================================================ scheduler (loop thread)
-// A finished download: swap the verified .tmp in (or drop it if the list was disabled meanwhile)
+// A finished download: swap the verified .tmp in. If the user disabled the list meanwhile, delete the .tmp.
+// The old PSRAM data stays active until the new file is in PSRAM.
+// On failure the old data stays active, and the list tries again in an hour.
 static void fetchDone(List &l, const NetFetch::Status &st) {
   char tmp[40], bin[40];
   path(tmp, l, "tmp");
   path(bin, l, "bin");
   l.want = false;
+  l.err = st;
   if (st.state == NetFetch::DONE && l.enabled) {
-    closeList(l);
     LittleFS.remove(bin);
-    if (LittleFS.rename(tmp, bin) && openList(l)) return;
-    l.err = st;
-    l.err.err = NetFetch::E_FS;
-  } else {
-    l.err = st;
+    l.err.err = LittleFS.rename(tmp, bin) ? openList(l) : NetFetch::E_FS;
+    if (l.err.err == NetFetch::E_NONE) {
+      l.failed = false;
+      return;
+    }
   }
   LittleFS.remove(tmp);
-  l.failed = l.enabled;
+  if (!l.enabled) return;
+  l.failed = l.want = true;
+  l.retryAt = millis() + HOUR_MS;
+  Serial.printf("[BL] %s: download failed (err %u), %s, retry in 1 h\n", l.m.id, l.err.err,
+                l.hs ? "old data stays active" : "not active");
 }
 
 void loop() {
@@ -404,11 +432,13 @@ void loop() {
   }
   for (int i = 0; i < s_n; i++) {
     List &l = L[i];
-    if (!l.enabled || !l.want || l.failed) continue;
-    if (l.hs && (l.m.bytes + 1023) / 1024 > freeKb()) {   // update: no room for both copies
+    if (!l.enabled || !l.want || (l.failed && (int32_t)(millis() - l.retryAt) < 0)) continue;
+    // An update with no room for two files: delete the old file. Its PSRAM data stays active.
+    // With too little RAM for TLS, start() refuses the job. Then the file must stay.
+    if (l.hs && (l.m.bytes + 1023) / 1024 > freeKb() &&
+        heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) >= NetFetch::MIN_HEAP) {
       char bin[40];
       path(bin, l, "bin");
-      closeList(l);
       LittleFS.remove(bin);
     }
     if (start(JOB_LIST_FETCH, l.m.id) == E_BUSY) return;

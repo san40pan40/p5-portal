@@ -21,7 +21,6 @@ static const char    *URL_LATEST = "https://github.com/san40pan40/p5-portal/rele
 #endif
 static const char    *URL_FW     = "https://github.com/san40pan40/p5-portal/releases/latest/download/firmware.bin";
 static const uint32_t TIMEOUT_MS = 10000;
-static const size_t   MIN_HEAP   = 60 * 1024;  // TLS needs ~45-55 KB of internal RAM in one piece
 static const uint32_t STACK      = 10240;      // TLS handshake is stack-hungry; ~2 KB margin over 8 KB
 
 // s is written by the job task while s_busy is set, read by the web layer (snapshot).
@@ -175,7 +174,10 @@ static void runList(NetworkClient &c, HTTPClient &h) {
   }
   if (idx) {
     LittleFS.remove("/bl/index.json");
-    LittleFS.rename(path, "/bl/index.json");
+    if (!LittleFS.rename(path, "/bl/index.json")) {
+      LittleFS.remove(path);
+      return finish(FAILED, E_FS);
+    }
   }
   Serial.printf("[FETCH] %s: %d bytes\n", path, got);
   finish(DONE);

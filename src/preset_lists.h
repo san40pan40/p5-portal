@@ -30,7 +30,8 @@ struct Info {                     // snapshot for the web page
   State    state;
   uint32_t count, bytes;          // local file if present, otherwise index.json values (0 = unknown)
   uint8_t  progress;              // LOADING: 0..100
-  NetFetch::Status err;           // FAILED: why
+  bool     active;                // the data is in PSRAM and blocks names (FAILED too: the old data)
+  NetFetch::Status err;           // FAILED: why (the list tries again in an hour)
 };
 
 void begin();                     // after LittleFS.begin(): open enabled lists, read cached index.json
@@ -43,7 +44,9 @@ int  find(const char *id);        // -1 = unknown id
 uint32_t setEnabled(int i, bool on);
 uint32_t freeKb();                // LittleFS free space minus the reserve, KB
 uint32_t totalKb();
-bool busy();                      // a list job is running (the page polls /api/update)
+bool busy();                      // a list job is running
+bool pending();                   // a job runs or a list waits for its download (the page polls /api/update)
+uint32_t stateCode();             // changes when a list state changes or a job starts or ends
 
 // The list that blocks this name (lowercase, no trailing dot), or -1. off = start of the matching
 // suffix in name (the "rule").

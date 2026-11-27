@@ -6,7 +6,6 @@
  */
 #include <Arduino.h>
 #include <IPAddress.h>
-#include "i18n.h"
 
 namespace Config {
 
@@ -37,7 +36,6 @@ struct Settings {
   KnownNet nets[MAX_NETS];    // uplink networks; netCount == 0 = do not connect
   uint8_t  netCount = 0;
   String   webPass;           // web panel password (login "admin"); empty = no password
-  I18n::Lang lang = I18n::Lang::UK;   // web panel language
 };
 
 extern Settings settings;

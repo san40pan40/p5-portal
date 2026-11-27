@@ -3,6 +3,7 @@
 #include <lwip/ip4_addr.h>   // ip4_addr_netmask_valid
 #include "app.h"
 #include "anti_bypass.h"
+#include "i18n.h"            // UI texts for static IP errors
 
 namespace Config {
 
@@ -31,7 +32,6 @@ static const char *K_DNS_UP     = "dns_up";
 static const char *K_DNS_ON     = "dns_on";
 static const char *K_GUARD_ON   = "guard_on";
 static const char *K_GUARD_DOH  = "guard_doh_ip";
-static const char *K_LANG       = "lang";
 static const char *K_NETS       = "nets";    // uplink list; the sta_* / st_* keys are its legacy form
 
 static Preferences prefs;
@@ -156,8 +156,6 @@ void load() {
   s.apSsid  = prefs.getString(K_AP_SSID, DEFAULT_AP_SSID);
   s.apPass  = prefs.getString(K_AP_PASS, DEFAULT_AP_PASS);
   s.webPass = prefs.getString(K_WEB_PASS, "");
-  s.lang    = prefs.getUChar(K_LANG, 0) == 1 ? I18n::Lang::EN : I18n::Lang::UK;
-  I18n::setLang(s.lang);
 
   // Uplink networks. Older firmware kept one network in sta_* / st_* keys: migrate it once.
   bool migrate = false;
@@ -229,7 +227,6 @@ void save() {
   prefs.putBool(K_DNS_ON, dns.enabled());
   prefs.putBool(K_GUARD_ON, AntiBypass::enabled());
   prefs.putBool(K_GUARD_DOH, AntiBypass::blockDohIps());
-  prefs.putUChar(K_LANG, (uint8_t)s.lang);
   prefs.end();
 }
 

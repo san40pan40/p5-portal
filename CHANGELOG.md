@@ -14,6 +14,10 @@ The release workflow copies the section of a version into the notes of its GitHu
 - `CHANGELOG.md`. The release workflow uses it for the release notes.
 
 ### Changed
+- The panel is in English only. The language switch is removed. This makes the firmware 15 KB smaller.
+- During a daily update of the preset blocklist, the old list continues to block. If the download fails, the board tries again after 1 hour.
+- The DNS page shows the download progress of the preset blocklist without a manual reload.
+- The update check shows "older than this build" when the running firmware is newer than the latest release.
 - README: new text that describes the current features.
 
 ## [0.2.0] - 2026-11-27

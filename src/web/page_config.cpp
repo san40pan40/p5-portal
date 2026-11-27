@@ -7,6 +7,7 @@
 #include "app_network.h"
 #include "app_board.h"
 #include "net_fetch.h"
+#include "preset_lists.h"
 #include "version_gen.h"
 
 using Config::settings;
@@ -142,13 +143,14 @@ static bool parseVer(const char *v, unsigned (&n)[3]) {
   return !v[used] || v[used] == '-' || v[used] == '+';
 }
 
-// 1 = latest is newer, 0 = same, 2 = older, -1 = not comparable (install is offered anyway)
+// 1 = latest is newer, 0 = same, 2 = older, -1 = not comparable (install is offered anyway).
+// Same numbers but not the same text ("v0.2.0-4-gabc" or "-dirty" after the tag): this build is newer.
 static int fwNewer(const char *latest) {
   unsigned a[3], b[3];
   if (!parseVer(latest, a) || !parseVer(FW_VERSION, b)) return -1;
   for (int i = 0; i < 3; i++)
     if (a[i] != b[i]) return a[i] > b[i] ? 1 : 2;
-  return 0;
+  return strcmp(latest, FW_VERSION) ? 2 : 0;
 }
 
 static void fwBlock(String &b) {
@@ -188,7 +190,7 @@ static void fwStart(NetFetch::Job job) {
 static void handleFwCheck()   { fwStart(NetFetch::JOB_FW_CHECK); }
 static void handleFwInstall() { fwStart(NetFetch::JOB_FW_INSTALL); }
 
-// GET /api/update: {state: idle|run|done|fail, job, latest, progress, error}
+// GET /api/update: {state: idle|run|done|fail, job, latest, progress, bl (preset list state code), error}
 static void handleApiUpdate() {
   using namespace NetFetch;
   const Status st = status();
@@ -198,7 +200,7 @@ static void handleApiUpdate() {
   err.replace("\"", "\\\"");
   String j = String("{\"state\":\"") + STATE[st.state] + "\",\"job\":\"" +
              (st.job == JOB_FW_INSTALL ? "install" : st.job == JOB_FW_CHECK ? "check" : "") + "\",\"latest\":\"" +
-             st.latest + "\",\"progress\":" + st.progress + ",\"error\":\"" + err + "\"}";
+             st.latest + "\",\"progress\":" + st.progress + ",\"bl\":" + PresetLists::stateCode() + ",\"error\":\"" + err + "\"}";
   server.send(200, "application/json", j);
 }
 

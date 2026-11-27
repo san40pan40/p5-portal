@@ -29,7 +29,10 @@ enum Err : uint8_t {
   E_SPACE,     // the list does not fit LittleFS (code = needed KB, detail = free KB)
   E_BAD_FILE,  // downloaded list: bad header, length or crc
   E_FS,        // could not write the file
+  E_MEM,       // not enough PSRAM to load the list
 };
+
+constexpr size_t MIN_HEAP = 60 * 1024;   // TLS needs ~45-55 KB of internal RAM in one piece
 
 struct Status {
   Job     job      = JOB_NONE;

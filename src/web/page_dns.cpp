@@ -113,8 +113,10 @@ static void handleDns() {
        "</table><p class=hint>" + T(DNS_RULES_HINT) + "</p></details></section></div>";
   flush(true);
 
-  // ---- Preset lists: a switch per list; app.js polls /api/update while a list job runs (#bl[data-r]) ----
-  p += String("<section class=card id=bl") + (PresetLists::busy() ? " data-r=1" : "") + "><h3>" + T(BL_CARD) + "</h3>";
+  // ---- Preset lists: a switch per list. While a job runs or a list waits, app.js polls /api/update.
+  // It reloads the page when "bl" (the state code) is not the same as data-r. ----
+  p += String("<section class=card id=bl") + (PresetLists::pending() ? " data-r=" + String(PresetLists::stateCode()) : "") +
+       "><h3>" + T(BL_CARD) + "</h3>";
   for (int i = 0; i < PresetLists::listCount(); i++) {
     const PresetLists::Info l = PresetLists::info(i);
     p += toggleRow(esc(l.name).c_str(), l.state != PresetLists::OFF, (String("/dns/bl?id=") + l.id).c_str());
@@ -130,7 +132,9 @@ static void handleDns() {
       case PresetLists::QUEUED:  p += tag(T(BL_QUEUED), "warn"); break;
       case PresetLists::LOADING: p += tag((String(T(BL_LOADING)) + "<b data-p>" + l.progress + "%</b>").c_str()); break;
       case PresetLists::READY:   p += tag(T(BL_READY), "ok"); break;
-      case PresetLists::FAILED:  p += "<br><span class=bad>" + String(T(BL_FAILED)) + esc(fetchErrText(l.err)) + "</span>"; break;
+      case PresetLists::FAILED:
+        if (l.active) p += tag(T(BL_READY), "ok");
+        p += "<br><span class=bad>" + String(T(BL_FAILED)) + esc(fetchErrText(l.err)) + "</span>"; break;
     }
     p += "</p>";
   }

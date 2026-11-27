@@ -54,7 +54,7 @@ pio: `C:\Users\san40\.platformio\penv\Scripts\pio.exe` (Python 3.11 penv). Flash
 | `dns_filter.*` | UDP:53 server, upstream forward, log `Ring<DnsLogEntry,60>`, stats, canary |
 | `rule_list.*` | `RuleList`: exact set + wildcard vector, suffix walk, LittleFS save (tmp+rename), `page()` |
 | `anti_bypass.*` | Wi-Fi RX hook on AP: drop :53/:853 to foreign IPs, optional DoH-IP :443 |
-| `i18n*` | X-macro string table, `I18n::setLang/t`, lang in NVS key "lang" |
+| `i18n*` | UI text table (English only): X-macro `X(ID, "text")` in `i18n_strings.h`, `T(ID)` |
 | `web/web.*` | shared HTML helpers (`sendPage`, `tile`, `row`, `postBtn`, `ruleTable`...), auth (`route`/`guarded`: Origin check + Basic auth admin) |
 | `web/page_*.cpp` | `/` status, `/dns` filter, `/bypass` guard, `/config` settings + `/update` OTA |
 

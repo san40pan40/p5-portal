@@ -1,6 +1,6 @@
 #include "dns_filter.h"
 #include "anti_bypass.h"      // AntiBypass::enabled() — whether the DoH list and the canary apply
-#include "i18n.h"             // translated reasons for a rejected upstream
+#include "i18n.h"             // UI texts: why the filter rejects an upstream
 #include "metrics.h"          // charts history + top tables
 #include "preset_lists.h"     // big downloaded blocklists, checked after the user's list
 #include <esp_random.h>
