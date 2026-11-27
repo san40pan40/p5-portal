@@ -77,38 +77,99 @@ String RuleList::normalize(String d) {
   return d;
 }
 
-// Many lines. Each line: "domain", "*.domain", "domain1 domain2",
-// or hosts-file format "0.0.0.0 domain1 domain2" (a leading IP is skipped). # starts a comment.
+// One line: "domain", "*.domain", "domain1 domain2", hosts format "0.0.0.0 domain1 domain2"
+// (a leading IP is skipped) or AdBlock "||domain^". "# ..." after a space and whole "!" lines are comments;
+// AdBlock cosmetic rules ("site.com##.ad") are skipped whole — cutting them at '#' would block the site.
+// Counts every rule token as added or skipped (invalid, duplicate, or over the limit).
+void RuleList::addLine(String line, int &added, int &skipped) {
+  int hash = line.indexOf('#');
+  if (hash > 0 && line[hash - 1] != ' ' && line[hash - 1] != '\t') {
+    skipped++;
+    return;
+  }
+  if (hash >= 0) line.remove(hash);
+  line.replace('\t', ' ');
+  line.replace('\r', ' ');
+  line.trim();
+  if (!line.length() || line[0] == '!') return;
+
+  bool first = true;
+  int p = 0;
+  while (p < (int)line.length() && !_full) {
+    int sp = line.indexOf(' ', p);
+    if (sp < 0) sp = line.length();
+    String tok = line.substring(p, sp);
+    p = sp + 1;
+    if (!tok.length()) continue;
+    if (first && isIpLiteral(tok)) { first = false; continue; }   // hosts-file format
+    first = false;
+    if (tok.startsWith("||")) {                  // AdBlock: ||host^ (options after ^ are ignored)
+      int c = tok.indexOf('^');
+      tok = tok.substring(2, c < 0 ? tok.length() : c);
+    }
+    String d = normalize(tok);
+    if (d.length() && _impReplace) {             // import "replace": clear only once a valid rule arrives,
+      _impReplace = false;                       // so an empty or wrong file does not wipe the list
+      clearRules();
+    }
+    if (d.length() && insert(d.c_str())) added++;
+    else skipped++;
+  }
+}
+
+// Many lines (the add form)
 int RuleList::add(const String &text) {
-  int added = 0, start = 0;
+  int added = 0, skipped = 0, start = 0;
   _full = false;
   while (start <= (int)text.length() && !_full) {
     int nl = text.indexOf('\n', start);
     if (nl < 0) nl = text.length();
-    String line = text.substring(start, nl);
+    addLine(text.substring(start, nl), added, skipped);
     start = nl + 1;
-
-    int hash = line.indexOf('#');
-    if (hash >= 0) line = line.substring(0, hash);
-    line.replace('\t', ' ');
-    line.replace('\r', ' ');
-
-    bool first = true;
-    int p = 0;
-    while (p < (int)line.length() && !_full) {
-      int sp = line.indexOf(' ', p);
-      if (sp < 0) sp = line.length();
-      String tok = line.substring(p, sp);
-      p = sp + 1;
-      if (!tok.length()) continue;
-      if (first && isIpLiteral(tok)) { first = false; continue; }   // hosts-file format
-      first = false;
-      String d = normalize(tok);
-      if (d.length() && insert(d.c_str())) added++;
-    }
   }
   if (added) save();
   return added;
+}
+
+// ================================================================ streamed import (file upload)
+void RuleList::importBegin(bool replace) {
+  _impLine.clear();
+  _impAdded = _impSkipped = 0;
+  _impLong = false;
+  _impReplace = replace;
+  _full = false;
+}
+
+void RuleList::importData(const uint8_t *buf, size_t len) {
+  for (size_t i = 0; i < len && !_full; i++) {
+    char c = (char)buf[i];
+    if (c == '\n') {
+      if (_impLong) _impSkipped++;
+      else addLine(String(_impLine.c_str()), _impAdded, _impSkipped);
+      _impLine.clear();
+      _impLong = false;
+    } else if (_impLine.size() < IMPORT_LINE_MAX) {
+      _impLine += c;
+    } else {
+      _impLong = true;                           // a line this long is no rule — skip it
+    }
+  }
+}
+
+bool RuleList::importEnd() {
+  if (_impLong) _impSkipped++;
+  else if (!_full && !_impLine.empty()) addLine(String(_impLine.c_str()), _impAdded, _impSkipped);
+  std::string().swap(_impLine);                  // give the buffer back
+  _impReplace = false;
+  if (_impAdded) save();
+  return _impAdded > 0;
+}
+
+void RuleList::clearRules() {
+  _wild.clear();
+  _set.clear();
+  _full = false;
+  _truncated = false;                            // an explicit reset/replace may rewrite the file
 }
 
 bool RuleList::remove(const String &rule) {
@@ -119,12 +180,13 @@ bool RuleList::remove(const String &rule) {
 }
 
 void RuleList::resetToDefaults() {
-  _wild.clear();
-  _set.clear();
-  _full = false;
-  _truncated = false;                            // an explicit reset may replace the file
+  clearRules();
   for (size_t i = 0; i < _defaultCount; i++) insert(_defaults[i]);
   save();
+}
+
+void RuleList::forEach(const std::function<void(const std::string &)> &f) const {
+  for (auto &s : _set) f(s);
 }
 
 std::vector<const std::string *> RuleList::page(const String &q, size_t offset, size_t limit,

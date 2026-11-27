@@ -6,6 +6,7 @@
 #include "app_config.h"
 #include "app_network.h"
 #include "app_board.h"
+#include "version_gen.h"
 
 using Config::settings;
 
@@ -149,7 +150,7 @@ static void handleConfig() {
   flushPage(b);
 
   // System: firmware info, OTA (file upload form), reboot, password recovery
-  b += card(I18n::CF_SYS_CARD) + "<p class=hint>" + T(CF_OTA_BUILD) + __DATE__ + " " + __TIME__ + T(CF_OTA_FREE) +
+  b += card(I18n::CF_SYS_CARD) + "<p class=hint>" + T(CF_OTA_BUILD) + "<b>" FW_VERSION "</b> (" __DATE__ ")" + T(CF_OTA_FREE) +
        String(ESP.getFreeSketchSpace() / 1024) + T(ST_KB) + ".</p>"
        "<form method=POST action='/update' enctype='multipart/form-data' "
        "onsubmit=\"this.querySelector('button').disabled=true;this.querySelector('span').textContent='" +

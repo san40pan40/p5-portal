@@ -147,12 +147,15 @@ static void handleDns() {
   // ---- Blocklist ----
   p += String("<section class=card id=list><h3>") + T(DNS_BLOCKLIST) + "</h3>";
   ruleTable(p, dns.blocklist(), "/dns", "/dns/del");
-  p += "</section>";
+  p += ruleIo("/dns") + "</section>";
   endPage(p);
 }
 
 static void handleAdd() { ruleAdd(dns.blocklist(), "/dns"); }
 static void handleDel() { ruleDel(dns.blocklist(), "/dns"); }
+static void handleExport() { ruleExport(dns.blocklist(), "blocklist", "p5-blocklist.txt"); }
+static void handleImport() { ruleImportUpload(dns.blocklist()); }
+static void handleImportDone() { ruleImportDone(dns.blocklist(), "/dns"); }
 
 static void handleToggle() {
   dns.setEnabled(!dns.enabled());
@@ -173,6 +176,8 @@ void registerDnsPage() {
   route("/dns",          HTTP_ANY,  handleDns);
   route("/dns/add",      HTTP_POST, handleAdd);
   route("/dns/del",      HTTP_POST, handleDel);
+  route("/dns/export",   HTTP_GET,  handleExport);
+  routeUpload("/dns/import", handleImportDone, handleImport);
   route("/dns/toggle",   HTTP_POST, handleToggle);
   route("/dns/upstream", HTTP_POST, handleUpstream);
 }

@@ -66,6 +66,12 @@ String chart(const char *keys, const char *title, const char *legend = "", bool 
 // ---- Shared actions ----
 void ruleAdd(RuleList &l, const char *page);
 void ruleDel(RuleList &l, const char *page);
+// Export: streamed text file, one rule per line. Import: routeUpload() pair — the upload part
+// parses the file chunk by chunk (merge, or replace with ?replace field), done() reports the counts.
+void ruleExport(const RuleList &l, const char *name, const char *file);
+void ruleImportUpload(RuleList &l);
+void ruleImportDone(RuleList &l, const char *page);
+String ruleIo(const char *page);                 // export link + import form (page = "/dns" or "/bypass")
 void finishToggle(const char *page, bool on, const char *onMsg, const char *offMsg);  // save + redirect
 
 // ---- Formatting ----

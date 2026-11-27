@@ -3,6 +3,7 @@
 #include "app_config.h"
 #include "app_network.h"
 #include "assets_gz.h"
+#include "version_gen.h"
 
 namespace Web {
 
@@ -80,9 +81,10 @@ void beginPage(const char *title, const char *active, int code, const char *extr
   h += extraHead;
   h += "<title>";
   h += title;
-  // ?v=build time: after a firmware update the browser fetches fresh styles, not cached ones
-  h += " · P5 Portal</title><link rel=stylesheet href='/style.css?v=" __DATE__ __TIME__ "'>"
-       "<script defer src='/app.js?v=" __DATE__ __TIME__ "'></script></head><body><header><div class=top>";
+  // ?v=version + build time: after a firmware update the browser fetches fresh styles, not cached ones
+#define P5_ASSET_V FW_VERSION "-" __DATE__ __TIME__
+  h += " · P5 Portal</title><link rel=stylesheet href='/style.css?v=" P5_ASSET_V "'>"
+       "<script defer src='/app.js?v=" P5_ASSET_V "'></script></head><body><header><div class=top>";
 
   const char *cls, *txt = hdrState(cls);
   h += "<span class=brand><span class='dot ";
@@ -291,6 +293,60 @@ void ruleAdd(RuleList &l, const char *page) {
 void ruleDel(RuleList &l, const char *page) {
   String r = server.arg("domain");
   redirectBack(page, l.remove(r) ? T(RULE_REMOVED) + r : String(T(RULE_NOT_FOUND)));
+}
+
+void ruleExport(const RuleList &l, const char *name, const char *file) {
+  server.sendHeader("Content-Disposition", String("attachment; filename=") + file);
+  server.sendHeader("Cache-Control", "no-store");
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(200, "text/plain; charset=utf-8", "");
+  String p;
+  p.reserve(1100);
+  p += "# P5 Portal ";
+  p += name;
+  p += " export " FW_VERSION "\n";                // never empty: an empty chunk would end the response
+  l.forEach([&p](const std::string &r) {
+    p.concat(r.data(), r.size());
+    p += '\n';
+    flushPage(p, 1000);                          // send in ~1 KB chunks, answer DNS meanwhile
+  });
+  flushPage(p);
+  server.sendContent("");
+}
+
+static bool s_impOk, s_impRan;                   // access checked at the start / a file was parsed
+void ruleImportUpload(RuleList &l) {
+  HTTPUpload &u = server.upload();
+  if (u.status == UPLOAD_FILE_START) {
+    s_impOk = accessOk();
+    // form fields before the file are already parsed, so the checkbox is known here
+    if (s_impOk) l.importBegin(server.arg("replace") == "1");
+  } else if (!s_impOk) {
+    return;
+  } else if (u.status == UPLOAD_FILE_WRITE) {
+    l.importData(u.buf, u.currentSize);
+    dns.loop();                                  // keep DNS running during the upload
+  } else if (u.status == UPLOAD_FILE_END || u.status == UPLOAD_FILE_ABORTED) {
+    l.importEnd();
+    s_impOk = false;
+    s_impRan = true;
+  }
+}
+
+void ruleImportDone(RuleList &l, const char *page) {   // via routeUpload(): access already checked
+  if (!s_impRan) return redirectMsg(page, T(RULES_NONE_ADDED));
+  s_impRan = false;
+  String m = T(IMP_ADDED) + String(l.importAdded()) + T(IMP_SKIPPED) + String(l.importSkipped());
+  if (l.limitHit()) m += T(RULES_LIMIT);
+  redirectMsg(page, m);
+}
+
+String ruleIo(const char *page) {
+  return String("<details><summary>") + T(LIST_IO) + "</summary><form method=POST action='" + page +
+         "/import' enctype='multipart/form-data'><label class=cb><input type=checkbox name=replace value=1>" +
+         T(IMP_REPLACE) + "</label><div class=row><input type=file name=f accept='.txt,text/plain' required><button>" +
+         T(IMP_BTN) + "</button></div><p class=hint>" + T(IMP_HINT) + "</p></form><div class=actions><a class='btn g' href='" +
+         page + "/export'>" + T(LIST_EXPORT) + "</a></div></details>";
 }
 
 // Language switch (header button or Settings): takes effect at once, no restart

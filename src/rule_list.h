@@ -12,6 +12,7 @@
  * The third ("raw" suffix) is a linear scan, so keep such rules few.
  */
 #include <Arduino.h>
+#include <functional>
 #include <string>
 #include <unordered_set>
 #include <vector>
@@ -30,7 +31,15 @@ public:
   bool load();                                    // from the file; no file -> the default list
   void resetToDefaults();                         // restore the default list and save it
   int  add(const String &text);                   // many rules (hosts format too); returns how many were added
-  bool limitHit() const { return _full; }         // the last add()/load() stopped at the limit
+  bool limitHit() const { return _full; }         // the last add()/load()/import stopped at the limit
+  // Streamed import (file upload): importBegin, importData per chunk (lines may span chunks),
+  // importEnd saves once. replace: the old rules go when the first valid rule arrives.
+  void importBegin(bool replace);
+  void importData(const uint8_t *buf, size_t len);
+  bool importEnd();                               // true if anything was added
+  int  importAdded() const { return _impAdded; }
+  int  importSkipped() const { return _impSkipped; }
+  void forEach(const std::function<void(const std::string &)> &f) const;   // every rule, any order
   bool remove(const String &rule);
   const std::string *match(const char *name, size_t len) const;   // matching rule or nullptr
   // A page for display: rules containing q (empty = all), alphabetical,
@@ -43,6 +52,9 @@ public:
 
 private:
   static String normalize(String d);              // string -> rule; "" if invalid
+  static constexpr size_t IMPORT_LINE_MAX = 300;
+  void addLine(String line, int &added, int &skipped);
+  void clearRules();
   bool insert(const std::string &rule);           // into _set and, if needed, _wild
   bool erase(const String &rule);
   bool save();
@@ -53,6 +65,9 @@ private:
   bool               _saveOk = true;
   bool               _full = false;
   bool               _truncated = false;          // the file holds more than was loaded
+  bool               _impReplace = false, _impLong = false;
+  int                _impAdded = 0, _impSkipped = 0;
+  std::string        _impLine;                    // import: the line split by a chunk boundary
   // unordered_set never moves its elements, so pointers to them stay valid
   std::unordered_set<std::string>  _set;
   std::vector<const std::string *> _wild;         // raw *suffix rules only

@@ -8,6 +8,7 @@
 #include "app_network.h"
 #include "anti_bypass.h"
 #include "metrics.h"
+#include "version_gen.h"
 
 namespace Web {
 
@@ -150,7 +151,7 @@ static void handleRoot() {
   p += row(T(ST_CHIP_TEMP), String(temperatureRead(), 1) + " °C");
   p += row(T(ST_FLASH), fsUsage());
   p += row(T(ST_AP_MAC), WiFi.softAPmacAddress());
-  p += row(T(ST_FIRMWARE), String(__DATE__) + " " + __TIME__);
+  p += row(T(ST_FIRMWARE), FW_VERSION " (" __DATE__ ")");
   p += "</table><div class=actions>" +
        postBtn("/reboot", T(ST_REBOOT), "r", nullptr, "", T(ST_REBOOT_CONFIRM)) + "</div></section>";
   p += "</div>";
@@ -169,7 +170,7 @@ static void handleApiStatus() {
   char j[600];
   snprintf(j, sizeof(j),
            "{\"hd\":[\"\",\"%s\"],\"ht\":\"%s\",\"cl\":%u,\"in\":[\"%s\",\"%s\"],\"inl\":\"%s\",\"rs\":[\"%s\",\"%s\"],"
-           "\"rsl\":\"%s\",\"up\":\"%s\",\"dt\":%u,\"bl\":%u,\"bll\":\"%s\",\"df\":%u,\"dx\":%u,\"ram\":\"%s\"}",
+           "\"rsl\":\"%s\",\"up\":\"%s\",\"dt\":%u,\"bl\":%u,\"bll\":\"%s\",\"df\":%u,\"dx\":%u,\"ram\":\"%s\",\"ver\":\"" FW_VERSION "\"}",
            hc, ht, (unsigned)WiFi.softAPgetStationNum(), inet ? T(ST_YES) : T(ST_NO), inetCls(inet),
            inetLabel(inet, n.ms).c_str(), rssiVal(sta, rssi).c_str(), rssiCls(sta, rssi), rssiLabel(sta, rssi).c_str(),
            fmtDur(Net::uptimeSec()).c_str(), (unsigned)dns.statTotal, (unsigned)dns.statBlocked, blockedLabel().c_str(),

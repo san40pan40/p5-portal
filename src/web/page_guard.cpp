@@ -54,8 +54,8 @@ static void handleGuard() {
        "<form method=POST action='/bypass/add'><div class=row><input name=domains placeholder='dns.example.com'>"
        "<button>" + T(ADD) + "</button></div></form><p class=hint>" + T(GD_RULES_HINT) + "</p>";
   ruleTable(p, bl, "/bypass", "/bypass/del");
-  p += String("<p class=hint><code>") + DnsFilter::firefoxCanary().c_str() + "</code>" + T(GD_CANARY_HINT) + "</p>"
-       "<div class=actions>" + postBtn("/bypass/reset", T(GD_RESET_LIST), "r", nullptr, "", T(GD_RESET_CONFIRM)) +
+  p += String("<p class=hint><code>") + DnsFilter::firefoxCanary().c_str() + "</code>" + T(GD_CANARY_HINT) + "</p>" +
+       ruleIo("/bypass") + "<div class=actions>" + postBtn("/bypass/reset", T(GD_RESET_LIST), "r", nullptr, "", T(GD_RESET_CONFIRM)) +
        "</div></section></div>";
   endPage(p);
 }
@@ -72,6 +72,9 @@ static void handleIpToggle() {
 
 static void handleAdd() { ruleAdd(dns.bypassList(), "/bypass"); }
 static void handleDel() { ruleDel(dns.bypassList(), "/bypass"); }
+static void handleExport() { ruleExport(dns.bypassList(), "DoH list", "p5-doh.txt"); }
+static void handleImport() { ruleImportUpload(dns.bypassList()); }
+static void handleImportDone() { ruleImportDone(dns.bypassList(), "/bypass"); }
 
 static void handleReset() {
   dns.bypassList().resetToDefaults();
@@ -84,6 +87,8 @@ void registerGuardPage() {
   route("/bypass/ip",     HTTP_POST, handleIpToggle);
   route("/bypass/add",    HTTP_POST, handleAdd);
   route("/bypass/del",    HTTP_POST, handleDel);
+  route("/bypass/export", HTTP_GET,  handleExport);
+  routeUpload("/bypass/import", handleImportDone, handleImport);
   route("/bypass/reset",  HTTP_POST, handleReset);
 }
 

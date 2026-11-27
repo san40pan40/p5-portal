@@ -17,3 +17,6 @@ compile_commands.json
 
 # Generated at build time by scripts/embed_assets.py
 src/web/assets_gz.h
+
+# Generated at build time by scripts/version.py
+src/version_gen.h

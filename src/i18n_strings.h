@@ -45,6 +45,14 @@ X(RULES_LIMIT,        ". Список повний (до 5000 правил аб�
                       ". The list is full (up to 5000 rules or low memory) — the rest was skipped.")
 X(RULES_NONE_ADDED,   "Нічого не додано: такі правила вже є або формат невірний",
                       "Nothing added: these rules already exist or the format is wrong")
+X(LIST_IO,            "Експорт / імпорт", "Export / import")
+X(LIST_EXPORT,        "Експортувати у файл", "Export to file")
+X(IMP_REPLACE,        "Замінити список, а не доповнити", "Replace the list instead of merging")
+X(IMP_BTN,            "Імпортувати", "Import")
+X(IMP_HINT,           "Текстовий файл: домен на рядок, формат hosts (<code>0.0.0.0 site.com</code>) або AdBlock (<code>||site.com^</code>). Рядки-коментарі <code>#</code> і <code>!</code> пропускаються.",
+                      "A text file: one domain per line, hosts format (<code>0.0.0.0 site.com</code>) or AdBlock (<code>||site.com^</code>). Comment lines <code>#</code> and <code>!</code> are skipped.")
+X(IMP_ADDED,          "Імпорт: додано ", "Import: added ")
+X(IMP_SKIPPED,        ", пропущено ", ", skipped ")
 X(RULE_REMOVED,       "Видалено: ", "Removed: ")
 X(RULE_NOT_FOUND,     "Правило не знайдено", "Rule not found")
 X(LANG_CHANGED,       "Мову змінено", "Language changed")
