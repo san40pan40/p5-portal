@@ -251,6 +251,28 @@ def main():
                                                                          separators=(",", ":"))))
     write_text(os.path.join(args.out, "NOTICE.txt"), "\n".join(notice))
     write_text(os.path.join(args.out, "changed.txt"), "\n".join(changed) + "\n")
+    # Notes for the GitHub release "lists" (not uploaded as a file)
+    rows = "\n".join("| [%s](%s) | %s |" % (s["name"], s["homepage"], s["license"]) for s in sources)
+    write_text(os.path.join(args.out, "RELEASE_NOTES.md"), """This release holds the preset blocklist for P5 Portal. It is not a firmware release.
+
+### Current list
+- File: `p5.bin`
+- Domains: %d
+- Size: %d KB
+- Build date: %s
+
+### How to use
+On the DNS page of the panel, turn on the switch **%s**. The board downloads the list and checks for a new version each day.
+
+### Sources
+| List | License |
+|---|---|
+%s
+
+Each list keeps its upstream license. See `NOTICE.txt` and the `*.LICENSE.txt` files.
+
+The workflow `blocklists` builds this release. It changes the files only when an upstream list changes.
+""" % (len(hashes), len(data) // 1024, today, LIST_ID, rows))
     gh_output("changed=true")
     for d in args.sample:
         print("h48(%s) = %012x" % (d, h48(d)))

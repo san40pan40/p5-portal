@@ -1,6 +1,8 @@
 # Builds the firmware for a version tag and publishes it as a GitHub release with the asset "firmware.bin"
 # (the board's update check reads /releases/latest and downloads that asset).
-# Cut a release: git tag v0.x.y && git push --tags   (a tag with "-", e.g. v0.3.0-rc1, becomes a pre-release)
+# The release notes come from the section of the version in CHANGELOG.md (scripts/release_notes.py).
+# The build fails if that section is missing.
+# Make a release: git tag v0.x.y && git push --tags   (a tag with "-", e.g. v0.3.0-rc1, makes a pre-release)
 name: release
 
 on:
@@ -45,6 +47,9 @@ jobs:
       - name: Install PlatformIO
         run: pip install --upgrade platformio
 
+      - name: Release notes from CHANGELOG.md
+        run: python scripts/release_notes.py "$TAG" > notes.md
+
       - name: Build
         run: |
           pio run -e esp32-s3-zero
@@ -55,13 +60,13 @@ jobs:
         run: |
           BIN=.pio/build/esp32-s3-zero/firmware.bin
           ls -l "$BIN"
-          NOTES="Install: Settings -> Firmware update (OTA) in the panel, or the update check. Note: the first install on a board that still has the old (default) partition table must be done over USB once (scripts/dev.ps1 usb or pio run -t upload); after that OTA works."
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" "$BIN" --clobber
+            gh release edit "$TAG" --notes-file notes.md
           else
             case "$TAG" in
               *-*) KIND="--prerelease" ;;
               *)   KIND="--latest" ;;
             esac
-            gh release create "$TAG" "$BIN" --verify-tag --title "$TAG" --generate-notes --notes "$NOTES" $KIND
+            gh release create "$TAG" "$BIN" --verify-tag --title "$TAG" --notes-file notes.md $KIND
           fi

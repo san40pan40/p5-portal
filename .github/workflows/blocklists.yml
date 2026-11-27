@@ -42,9 +42,9 @@ jobs:
         run: |
           ls -l out
           if ! gh release view lists >/dev/null 2>&1; then
-            gh release create lists --title "Blocklists" --prerelease --latest=false \
-              --target "${{ github.sha }}" \
-              --notes "Preset blocklists for P5 Portal, rebuilt by .github/workflows/blocklists.yml when an upstream list changes. Not a firmware release. Each list keeps its upstream license: see NOTICE.txt and the *.LICENSE.txt files."
+            gh release create lists --title "Blocklists" --prerelease --latest=false --target "${{ github.sha }}" --notes-file out/RELEASE_NOTES.md
+          else
+            gh release edit lists --notes-file out/RELEASE_NOTES.md
           fi
           (cd out && xargs -a changed.txt gh release upload lists --clobber)
           # a rebuild lists every published file in changed.txt: remove assets that are no longer produced
