@@ -47,3 +47,7 @@ jobs:
               --notes "Preset blocklists for P5 Portal, rebuilt by .github/workflows/blocklists.yml when an upstream list changes. Not a firmware release. Each list keeps its upstream license: see NOTICE.txt and the *.LICENSE.txt files."
           fi
           (cd out && xargs -a changed.txt gh release upload lists --clobber)
+          # a rebuild lists every published file in changed.txt: remove assets that are no longer produced
+          gh release view lists --json assets -q '.assets[].name' | while read -r a; do
+            grep -qxF "$a" out/changed.txt || gh release delete-asset lists "$a" -y
+          done

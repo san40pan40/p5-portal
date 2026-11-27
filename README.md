@@ -57,14 +57,14 @@ A tag with a suffix (`v0.x.y-rc1`) becomes a pre-release, which the panel's upda
 
 ## Blocklists
 
-Preset blocklists are not stored in git. `.github/workflows/blocklists.yml` rebuilds them on manual run (Actions → blocklists → Run workflow; it does nothing if no upstream list changed) with `scripts/build_lists.py` from the upstream lists in `blocklists/sources.json` and publishes them to the [`lists`](../../releases/tag/lists) pre-release: a compact `<id>.bin` per list (sorted 64-bit FNV-1a hashes of the domains) plus `index.json`.
+Preset blocklists are not stored in git. `.github/workflows/blocklists.yml` rebuilds them on manual run (Actions → blocklists → Run workflow; it does nothing if no upstream list changed) with `scripts/build_lists.py` from the upstream lists in `blocklists/sources.json` and publishes them to the [`lists`](../../releases/tag/lists) pre-release: one merged `p5.bin` built from all sources below (sorted 48-bit hashes of the domains, ~115k domains in ~675 KB) plus `index.json`. The board loads it into PSRAM, so a lookup takes well under a millisecond.
 
 | List | License |
 |---|---|
 | [StevenBlack hosts](https://github.com/StevenBlack/hosts) (base) | MIT |
 | [HaGeZi Multi LIGHT](https://github.com/hagezi/dns-blocklists) | GPL-3.0 |
 
-Each list keeps its upstream license; the license texts and `NOTICE.txt` are published next to the files. Build locally: `python scripts/build_lists.py` (output in `blocklists/out/`).
+Each list keeps its upstream license; the license texts and `NOTICE.txt` are published next to the files. Build locally: `uv run scripts/build_lists.py` (output in `blocklists/out/`).
 
 ## Project layout
 
