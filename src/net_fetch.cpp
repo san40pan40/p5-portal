@@ -23,20 +23,24 @@ static const char    *URL_FW     = "https://github.com/san40pan40/p5-portal/rele
 static const uint32_t TIMEOUT_MS = 10000;
 static const uint32_t STACK      = 10240;      // TLS handshake is stack-hungry; ~2 KB margin over 8 KB
 
-// s is written by the job task while s_busy is set, read by the web layer (snapshot).
+// Firmware jobs and list jobs have different status records. Thus a list job does not erase
+// a firmware result (for example "installed, restart"). s points to the record of the current job.
+// The job task writes *s while s_busy is set. The web layer reads a snapshot.
 // The task fills the text fields BEFORE it sets the final state.
-static Status            s;
+static Status            s_fw, s_list;
+static Status           *s = &s_fw;
 static std::atomic<bool> s_busy{false};
 
 bool busy() { return s_busy; }
-Status status() { return s; }
+Status fwStatus() { return s_fw; }
+Status listStatus() { return s_list; }
 
 static void finish(State st, Err e = E_NONE, int code = 0, const char *detail = "") {
-  s.err  = e;
-  s.code = code;
-  strlcpy(s.detail, detail, sizeof(s.detail));
-  s.state = st;
-  if (st == FAILED) Serial.printf("[FETCH] job %u failed: err %u code %d %s\n", s.job, e, code, detail);
+  s->err  = e;
+  s->code = code;
+  strlcpy(s->detail, detail, sizeof(s->detail));
+  s->state = st;
+  if (st == FAILED) Serial.printf("[FETCH] job %u failed: err %u code %d %s\n", s->job, e, code, detail);
 }
 
 static void httpFail(int code) {
@@ -55,16 +59,16 @@ static void runCheck(NetworkClient &c, HTTPClient &h) {
   int i = loc.indexOf("/releases/tag/");
   size_t n = 0;
   if (i >= 0)                                    // keep only safe tag characters (shown in HTML/JSON)
-    for (const char *p = loc.c_str() + i + 14; *p && n + 1 < sizeof(s.latest); p++) {
+    for (const char *p = loc.c_str() + i + 14; *p && n + 1 < sizeof(s->latest); p++) {
       if (!isalnum((unsigned char)*p) && !strchr(".-_+", *p)) break;
-      s.latest[n++] = *p;
+      s->latest[n++] = *p;
     }
-  s.latest[n] = 0;
-  Serial.printf("[FETCH] latest release: %s\n", n ? s.latest : "(none)");
+  s->latest[n] = 0;
+  Serial.printf("[FETCH] latest release: %s\n", n ? s->latest : "(none)");
   finish(DONE);
 }
 
-// Reads a body of len bytes from h in chunks of up to 1 KB into sink, updating s.progress.
+// Reads a body of len bytes from h in chunks of up to 1 KB into sink, updating s->progress.
 // Stops on a sink error (E_FLASH), a stalled or closed connection (E_TIMEOUT). got = bytes read.
 static Err pump(HTTPClient &h, int len, bool (*sink)(const uint8_t *, size_t), int &got) {
   uint8_t *buf = (uint8_t *)malloc(1024);
@@ -79,7 +83,7 @@ static Err pump(HTTPClient &h, int len, bool (*sink)(const uint8_t *, size_t), i
       if (!sink(buf, r)) e = E_FLASH;
       got += r;
       last = millis();
-      s.progress = (uint64_t)got * 100 / len;
+      s->progress = (uint64_t)got * 100 / len;
       delay(1);                                  // yield: let the web/DNS loop and IDLE run
     } else if (!st->connected() || millis() - last > TIMEOUT_MS) {
       e = E_TIMEOUT;                             // nothing read: stalled or closed — never spin forever
@@ -135,14 +139,14 @@ static bool listSink(const uint8_t *b, size_t n) {
 }
 
 static void runList(NetworkClient &c, HTTPClient &h) {
-  const bool idx = s.job == JOB_LIST_INDEX;
+  const bool idx = s->job == JOB_LIST_INDEX;
   char url[160], path[40];
   if (idx) {
     snprintf(url, sizeof(url), "%sindex.json", P5_LISTS_BASE);
     strlcpy(path, "/bl/index.tmp", sizeof(path));   // replaces /bl/index.json when complete
   } else {
-    snprintf(url, sizeof(url), "%s%s.bin", P5_LISTS_BASE, s.arg);
-    snprintf(path, sizeof(path), "/bl/%s.tmp", s.arg);
+    snprintf(url, sizeof(url), "%s%s.bin", P5_LISTS_BASE, s->arg);
+    snprintf(path, sizeof(path), "/bl/%s.tmp", s->arg);
   }
   h.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
   if (!h.begin(c, url)) return finish(FAILED, E_CONNECT);
@@ -193,8 +197,8 @@ static void task(void *) {
     h.setUserAgent("P5-Portal/" FW_VERSION);
     h.setConnectTimeout(TIMEOUT_MS);
     h.setTimeout(TIMEOUT_MS);
-    if (s.job == JOB_FW_CHECK)        runCheck(c, h);
-    else if (s.job == JOB_FW_INSTALL) runInstall(c, h);
+    if (s->job == JOB_FW_CHECK)        runCheck(c, h);
+    else if (s->job == JOB_FW_INSTALL) runInstall(c, h);
     else runList(strncmp(P5_LISTS_BASE, "http:", 5) ? (NetworkClient &)c : plain, h);
     h.end();
   }                                              // TLS context freed here
@@ -210,16 +214,17 @@ Err start(Job job, const char *arg) {
   if (Update.isRunning()) { s_busy = false; return E_BUSY; }    // a file OTA upload is in progress
   const size_t blk = heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL);
   Status n;                                       // fresh status; an install keeps the tag it installs
-  if (job == JOB_FW_INSTALL) strlcpy(n.latest, s.latest, sizeof(n.latest));
+  if (job == JOB_FW_INSTALL) strlcpy(n.latest, s_fw.latest, sizeof(n.latest));
   n.job = job;
   strlcpy(n.arg, arg, sizeof(n.arg));
-  s = n;
+  s = job >= JOB_LIST_INDEX ? &s_list : &s_fw;
+  *s = n;
   if (blk < MIN_HEAP) {
     finish(FAILED, E_HEAP, blk / 1024);
     s_busy = false;
     return E_HEAP;
   }
-  s.state = RUNNING;
+  s->state = RUNNING;
   Serial.printf("[FETCH] job %u start, largest internal block %u B\n", job, (unsigned)blk);
   if (xTaskCreate(task, "fetch", STACK, nullptr, 1, nullptr) != pdPASS) {
     finish(FAILED, E_TASK);

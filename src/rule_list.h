@@ -19,9 +19,9 @@
 
 class RuleList {
 public:
-  // Rules live in internal RAM (~80 bytes each). Hard cap per list, and inserting also stops while
-  // free internal heap is below MIN_FREE_HEAP — so a huge paste or file cannot starve Wi-Fi/lwIP
-  // (and load() cannot crash on every boot).
+  // Rules live in internal RAM (~80 bytes each). Hard cap per list. A user add or import also stops
+  // while free internal heap is below MIN_FREE_HEAP, so a huge paste or file cannot starve Wi-Fi/lwIP.
+  // load() applies only the cap: the saved rules fitted RAM when the user added them.
   static constexpr size_t   MAX_RULES     = 5000;
   static constexpr uint32_t MIN_FREE_HEAP = 40 * 1024;
 
@@ -48,7 +48,7 @@ public:
   // Only sorts up to the end of the requested page, not the whole list.
   std::vector<const std::string *> page(const String &q, size_t offset, size_t limit, size_t &matched) const;
   size_t size() const { return _set.size(); }
-  bool   lastSaveOk() const { return _saveOk; }
+  bool   lastSaveOk() const { return _saveOk; }   // false also when a truncated list refused to save
   bool   truncated() const { return _truncated; }  // load() hit the limit: saving is refused
 
 private:
@@ -57,7 +57,7 @@ private:
   void addLine(String line, int &added, int &skipped);
   void importLine();
   void clearRules();
-  bool insert(const std::string &rule);           // into _set and, if needed, _wild
+  bool insert(const std::string &rule, bool heapFloor = true);   // into _set and, if needed, _wild
   bool erase(const String &rule);
   bool save();
 

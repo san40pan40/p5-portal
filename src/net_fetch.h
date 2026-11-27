@@ -7,7 +7,7 @@
  * Jobs: firmware version check (GitHub "latest release" redirect), firmware install
  * (release asset firmware.bin -> Update), preset blocklists (release "lists": index.json, <id>.bin
  * -> LittleFS /bl/, the .bin goes to /bl/<id>.tmp and is verified; PresetLists swaps it in).
- * The web layer starts a job and polls status(); texts for errors live in the web layer (i18n).
+ * The web layer starts a job and polls fwStatus() / listStatus(); texts for errors live in the web layer (i18n).
  */
 #include <Arduino.h>
 
@@ -47,6 +47,7 @@ struct Status {
 
 Err    start(Job job, const char *arg = "");   // E_NONE = started; otherwise the reason (nothing started)
 bool   busy();
-Status status();         // snapshot; text fields are final once state != RUNNING
+Status fwStatus();       // last firmware job (check / install): snapshot; text fields are final once state != RUNNING
+Status listStatus();     // last preset list job (index / list): snapshot, the same rules
 
 }  // namespace NetFetch

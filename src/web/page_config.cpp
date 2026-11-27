@@ -155,8 +155,7 @@ static int fwNewer(const char *latest) {
 
 static void fwBlock(String &b) {
   using namespace NetFetch;
-  Status st = status();
-  if (st.job >= JOB_LIST_INDEX) st = Status();   // a preset list job: shown on the DNS page
+  const Status st = fwStatus();                  // preset list jobs are on the DNS page
   const bool run = st.state == RUNNING, inst = st.job == JOB_FW_INSTALL;
   b += String("<div id=fw") + (run ? " data-r=1>" : ">");
   if (run && inst) {
@@ -190,17 +189,19 @@ static void fwStart(NetFetch::Job job) {
 static void handleFwCheck()   { fwStart(NetFetch::JOB_FW_CHECK); }
 static void handleFwInstall() { fwStart(NetFetch::JOB_FW_INSTALL); }
 
-// GET /api/update: {state: idle|run|done|fail, job, latest, progress, bl (preset list state code), error}
+// GET /api/update: {state: idle|run|done|fail, job, latest, progress, error} of the last firmware job,
+// bl (preset list state code), blp (progress of the list download)
 static void handleApiUpdate() {
   using namespace NetFetch;
-  const Status st = status();
+  const Status st = fwStatus();
   static const char *const STATE[] = {"idle", "run", "done", "fail"};
   String err = st.state == FAILED ? fetchErrText(st) : String();
   err.replace("\\", "\\\\");
   err.replace("\"", "\\\"");
   String j = String("{\"state\":\"") + STATE[st.state] + "\",\"job\":\"" +
              (st.job == JOB_FW_INSTALL ? "install" : st.job == JOB_FW_CHECK ? "check" : "") + "\",\"latest\":\"" +
-             st.latest + "\",\"progress\":" + st.progress + ",\"bl\":" + PresetLists::stateCode() + ",\"error\":\"" + err + "\"}";
+             st.latest + "\",\"progress\":" + st.progress + ",\"bl\":" + PresetLists::stateCode() +
+             ",\"blp\":" + listStatus().progress + ",\"error\":\"" + err + "\"}";
   server.send(200, "application/json", j);
 }
 
@@ -256,7 +257,9 @@ static void handleNetSave() {
   if (si.length() && (i < 0 || i >= s.netCount || s.nets[i].ssid != server.arg("os")))
     return sendError(T(CF_NET_STALE), "/config");
   const int dup = knownIndex(ssid);
-  if (i < 0) i = dup;                              // a known SSID added again: update it in place
+  // A known SSID added again: update only its password. The empty add form must not erase its static IP.
+  const bool keepSt = i < 0 && dup >= 0;
+  if (i < 0) i = dup;
   else if (dup >= 0 && dup != i) return sendError(String(T(CF_NET_KNOWN)) + ": " + ssid, "/config");
   if (i < 0 && s.netCount >= Config::MAX_NETS) return sendError(T(CF_NETS_FULL), "/config");
 
@@ -276,7 +279,7 @@ static void handleNetSave() {
   Config::KnownNet &n = s.nets[i];
   if (pass.length() || n.ssid != ssid) n.pass = pass;   // empty keeps the password only for the same SSID
   n.ssid = ssid;
-  n.st = st;
+  if (!keepSt) n.st = st;
   Config::save();
   Net::reselect(force);
   redirectMsg("/config", T(CF_NET_SAVED) + ssid);

@@ -295,15 +295,23 @@ void ruleTable(String &p, const RuleList &l, const char *page, const char *delAc
 }
 
 // ================================================================ shared actions
+// ". <why>" when the last change was not saved to flash, else ""
+static String notSaved(const RuleList &l) {
+  if (l.truncated()) return String(". ") + T(LIST_TRUNCATED);
+  return l.lastSaveOk() ? String() : String(". ") + T(SAVE_FAILED);
+}
+
 void ruleAdd(RuleList &l, const char *page) {
   int n = l.add(server.arg("domains"));
-  if (l.limitHit()) return redirectBack(page, T(RULES_ADDED) + String(n) + T(RULES_LIMIT));
-  redirectBack(page, n ? T(RULES_ADDED) + String(n) : String(T(RULES_NONE_ADDED)));
+  String m = n ? T(RULES_ADDED) + String(n) : String(T(RULES_NONE_ADDED));
+  if (l.limitHit()) m = T(RULES_ADDED) + String(n) + T(RULES_LIMIT);
+  if (n) m += notSaved(l);
+  redirectBack(page, m);
 }
 
 void ruleDel(RuleList &l, const char *page) {
   String r = server.arg("domain");
-  redirectBack(page, l.remove(r) ? T(RULE_REMOVED) + r : String(T(RULE_NOT_FOUND)));
+  redirectBack(page, l.remove(r) ? T(RULE_REMOVED) + r + notSaved(l) : String(T(RULE_NOT_FOUND)));
 }
 
 void ruleExport(const RuleList &l, const char *name, const char *file) {
@@ -352,8 +360,7 @@ void ruleImportDone(RuleList &l, const char *page) {   // via routeUpload(): acc
   if (s_impAborted) return redirectMsg(page, T(IMP_ABORTED));
   String m = T(IMP_ADDED) + String(l.importAdded()) + T(IMP_SKIPPED) + String(l.importSkipped());
   if (l.limitHit()) m += T(RULES_LIMIT);
-  if (l.importAdded() && l.truncated()) m += String(". ") + T(LIST_TRUNCATED);
-  else if (l.importAdded() && !l.lastSaveOk()) m += String(". ") + T(SAVE_FAILED);
+  if (l.importAdded()) m += notSaved(l);
   redirectMsg(page, m);
 }
 

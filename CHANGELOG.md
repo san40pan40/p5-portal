@@ -21,6 +21,14 @@ The release workflow copies the section of a version into the notes of its GitHu
 - README: new text that describes the current features.
 - The development script is `scripts/dev.py` now. It replaces `scripts/dev.ps1` and operates on Windows and macOS. It has the same commands: `all`, `build`, `ota`, `check` and `usb`.
 
+### Fixed
+- A preset list download deleted the result of an online firmware update. The "installed, restart" message and the automatic restart did not occur, and the old firmware continued to operate.
+- When you added a saved network again, the board cleared its static IP settings. Now the board keeps them and changes only the password.
+- Sometimes there was not sufficient PSRAM for the old and the new data of a preset list. Then the board downloaded the list again each hour. Now the board frees the old data first.
+- A rule list was sometimes loaded only partly when free RAM was low for a short time (for example during an HTTPS download). Until a restart, the board did not save changes to that list.
+- When you add or delete a rule and the board cannot save the list, the message now tells you that the change is not saved.
+- When you deleted a network while the board changed to a different network, the board could connect to the wrong network.
+
 ## [0.2.0] - 2026-11-27
 
 ### Important

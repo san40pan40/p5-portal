@@ -290,6 +290,8 @@ void reselect(bool force) {
     if (WiFi.getMode() & WIFI_MODE_STA) WiFi.disconnect(false, false, 0);
     s_activeSsid[0] = 0;
   }
+  // The list may have moved: a pending join is always for the active network, so it gets its new index
+  if (s_pending >= 0) s_pending = idx;
   s_active = idx;
   s_rr = 0;
   s_cycle = 0;

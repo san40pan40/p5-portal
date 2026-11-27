@@ -33,5 +33,5 @@ c.innerHTML='<div class=chh><span>'+c.dataset.t+'</span><span>'+hd+'</span></div
 // Preset lists (#bl, DNS): while a list waits or downloads, poll and reload when the state code (j.bl) changes.
 // #fwr = firmware installed: restart through the restart page.
 var F=document.querySelector('#fw[data-r],#bl[data-r]');
-if(F)setInterval(function(){fetch('/api/update',{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){if(F.id=='bl'?j.bl!=F.dataset.r:j.state!='run')location.reload();else{var p=F.querySelector('[data-p]');if(p)p.textContent=j.progress+'%'}},function(){})},1000);
+if(F)setInterval(function(){fetch('/api/update',{cache:'no-store'}).then(function(r){return r.json()}).then(function(j){if(F.id=='bl'?j.bl!=F.dataset.r:j.state!='run')location.reload();else{var p=F.querySelector('[data-p]');if(p)p.textContent=(F.id=='bl'?j.blp:j.progress)+'%'}},function(){})},1000);
 if(document.getElementById('fwr'))document.getElementById('fwr').submit();

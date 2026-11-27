@@ -347,7 +347,7 @@ Info info(int i) {
   if (!l.enabled) r.state = OFF;
   else if (s_job == NetFetch::JOB_LIST_FETCH && s_cur == i) {
     r.state = LOADING;
-    r.progress = NetFetch::status().progress;
+    r.progress = NetFetch::listStatus().progress;
   } else if (l.failed) r.state = FAILED;
   else if (l.want || !l.hs) r.state = QUEUED;
   else r.state = READY;
@@ -370,19 +370,33 @@ bool pending() {
 
 // ================================================================ scheduler (loop thread)
 // A finished download: swap the verified .tmp in. If the user disabled the list meanwhile, delete the .tmp.
-// The old PSRAM data stays active until the new file is in PSRAM.
-// On failure the old data stays active, and the list tries again in an hour.
+// The old PSRAM data stays active until the new file is in PSRAM. If there is no PSRAM for
+// the old and the new data together, the old data is freed first (a short gap in the filter).
+// On a failed download the old data stays active, and the list tries again in an hour.
+// A good file that does not fit PSRAM is not downloaded again (the index check tries to load it).
 static void fetchDone(List &l, const NetFetch::Status &st) {
+  using namespace NetFetch;
   char tmp[40], bin[40];
   path(tmp, l, "tmp");
   path(bin, l, "bin");
   l.want = false;
   l.err = st;
-  if (st.state == NetFetch::DONE && l.enabled) {
+  if (st.state == DONE && l.enabled) {
     LittleFS.remove(bin);
-    l.err.err = LittleFS.rename(tmp, bin) ? openList(l) : NetFetch::E_FS;
-    if (l.err.err == NetFetch::E_NONE) {
+    Err e = LittleFS.rename(tmp, bin) ? openList(l) : E_FS;
+    if (e == E_MEM && l.hs) {
+      closeList(l);
+      e = openList(l);
+    }
+    l.err.err = e;
+    if (e == E_NONE) {
       l.failed = false;
+      return;
+    }
+    if (e == E_MEM) {
+      l.err.state = NetFetch::FAILED;
+      l.failed = true;
+      Serial.printf("[BL] %s: not enough PSRAM, not active\n", l.m.id);
       return;
     }
   }
@@ -398,7 +412,13 @@ void loop() {
   using namespace NetFetch;
   if (s_job != JOB_NONE) {
     if (NetFetch::busy()) return;
-    const Status st = status();
+    Status st = listStatus();
+    if (st.job != s_job) {                            // not the record of our job: treat it as lost
+      st = Status();
+      st.job = s_job;
+      st.state = NetFetch::FAILED;
+      st.err = E_TASK;
+    }
     if (s_job == JOB_LIST_FETCH) {
       fetchDone(L[s_cur], st);
     } else if (st.state == DONE) {
@@ -406,6 +426,16 @@ void loop() {
       parseIndex();
       for (int i = 0; i < s_n; i++) {                 // missing or changed files -> download
         List &l = L[i];
+        if (l.enabled && !l.hs && l.failed && l.err.err == E_MEM) {   // a good file, no PSRAM: load it again
+          const Err e = openList(l);
+          if (e == E_NONE) l.failed = false;
+          else if (e != E_MEM) {                      // the file is gone or bad: download it again
+            l.err.err = e;
+            l.want = true;
+            l.failed = false;
+          }
+          continue;
+        }
         if (l.enabled && (!l.hs || (l.m.crc && l.m.crc != l.crc))) {
           l.want = true;
           l.failed = false;

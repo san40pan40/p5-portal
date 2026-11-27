@@ -37,8 +37,8 @@ const std::string *RuleList::match(const char *name, size_t len) const {
 }
 
 // ================================================================ changes
-bool RuleList::insert(const std::string &rule) {
-  if (_set.size() >= MAX_RULES || ESP.getFreeHeap() < MIN_FREE_HEAP) {
+bool RuleList::insert(const std::string &rule, bool heapFloor) {
+  if (_set.size() >= MAX_RULES || (heapFloor && ESP.getFreeHeap() < MIN_FREE_HEAP)) {
     _full = true;
     return false;
   }
@@ -225,7 +225,7 @@ std::vector<const std::string *> RuleList::page(const String &q, size_t offset, 
 // Atomic save: write a temp file and replace the real one only if it was written COMPLETELY.
 // A partial write (full flash, failure) leaves the old list untouched.
 bool RuleList::save() {
-  if (_truncated) return false;                  // would cut the file down to what fit in RAM
+  if (_truncated) return _saveOk = false;        // would cut the file down to what fit in RAM
   String tmp = String(_file) + ".tmp";
   File f = LittleFS.open(tmp, "w");
   if (!f) return _saveOk = false;
@@ -262,11 +262,13 @@ bool RuleList::load() {
   _set.reserve(f.size() / 16 + 16);              // ~16 bytes per rule — fewer rehashes
   // Read in 1 KB blocks and split lines ourselves (byte-by-byte Stream reads are very slow).
   // Only save() writes this file, so the rules are already normalised — no re-validation.
+  // Only MAX_RULES applies here, not the heap floor: the rules in the file fitted RAM when the user added them.
+  // A short heap low (for example a TLS session) must not cut the list and stop saving until a restart.
   char buf[1024];
   std::string line;
   auto flushLine = [&]() {
     while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
-    if (!line.empty()) insert(line);
+    if (!line.empty()) insert(line, false);
     line.clear();
   };
   while (!_full) {                               // at the limit: keep what fits, skip the rest

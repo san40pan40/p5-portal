@@ -205,10 +205,11 @@ def cmd_check():
         bad += 1
     ads = dns_a("doubleclick.net")
     if not ads or "0.0.0.0" not in ads:
-        # The on/off tag is between the first toggle row and its /dns/toggle button. "bad" = off.
+        # The filter switch is the /dns/toggle form: its checkbox has "checked" when the filter is on.
         html = request("/dns")[2].decode("utf-8", "replace")
-        a, b = html.find("<div class=row><b>"), html.find("/dns/toggle")
-        if a >= 0 and b > a and "bad" in html[a:b]:
+        a = html.find("action='/dns/toggle'")
+        b = html.find("</form>", a)
+        if a >= 0 and b > a and " checked" not in html[a:b]:
             out("WARN DNS: filter is switched OFF in the panel - blocking not tested")
         else:
             out("FAIL DNS: doubleclick.net not blocked")
