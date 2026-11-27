@@ -11,6 +11,7 @@ Public repo: github.com/san40pan40/p5-portal (MIT). Plan / roadmap: `TODO.md` �
 - Local scripts: **Python, run with `uv run scripts/<x>.py`** (PEP 723 header, stdlib), must work on Windows and macOS (the user will continue on a Mac). No new PowerShell/bash scripts.
 - GitHub CLI: `gh` (Windows: `C:\Program Files\GitHub CLI\gh.exe`), logged in as the repo owner.
 - Keep changes small and in the existing style; no new libraries without asking.
+- Docs (README, TODO, CLAUDE.md, release notes) and code comments: **ASD-STE100 Simplified Technical English** — always use the `/asd-ste100` skill when writing them. If the skill is not available: short sentences (≤ 20 words for instructions, ≤ 25 for descriptions), active voice, imperative for instructions, one topic per sentence, one meaning per word, no idioms.
 - When the user states a lasting rule or preference ("from now on", "always", tooling, language, workflow), record it here in Rules right away.
 
 ## Decisions (keep unless the user changes them)
