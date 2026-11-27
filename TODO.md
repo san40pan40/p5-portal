@@ -11,9 +11,10 @@
 - [x] Preset blocklist: one merged 48-bit list from StevenBlack and HaGeZi Light. A manual workflow builds it. The board keeps it in PSRAM and checks for updates each day.
 - [x] English-only UI (the Ukrainian text was removed to save flash)
 - [x] CHANGELOG.md and release notes from it
+- [x] Dev script in Python (`uv run scripts/dev.py`) for Windows and macOS
 
 ## Next
-1. Port `scripts/dev.ps1` to Python (`uv run scripts/dev.py`), so that development works on macOS.
+Nothing planned. Pick an item from Ideas.
 
 ## Ideas / known gaps
 - DNS over TCP (large answers > 1232 bytes)

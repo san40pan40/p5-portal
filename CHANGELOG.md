@@ -19,6 +19,7 @@ The release workflow copies the section of a version into the notes of its GitHu
 - The DNS page shows the download progress of the preset blocklist without a manual reload.
 - The update check shows "older than this build" when the running firmware is newer than the latest release.
 - README: new text that describes the current features.
+- The development script is `scripts/dev.py` now. It replaces `scripts/dev.ps1` and operates on Windows and macOS. It has the same commands: `all`, `build`, `ota`, `check` and `usb`.
 
 ## [0.2.0] - 2026-11-27
 

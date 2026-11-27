@@ -35,14 +35,15 @@ When a feature is done, suggest `/clear` before the next one (fresh context is c
 
 ## Build / flash / test (use the script — it prints only what matters)
 ```
-powershell -File scripts/dev.ps1            # build + OTA + smoke test (default)
-powershell -File scripts/dev.ps1 build      # compile only (errors + RAM/Flash summary)
-powershell -File scripts/dev.ps1 check      # smoke test only: pages 200 + DNS blocks doubleclick.net
-powershell -File scripts/dev.ps1 usb        # first flash / recovery over USB
+uv run scripts/dev.py            # build + OTA + smoke test (default)
+uv run scripts/dev.py build      # compile only (errors + RAM/Flash summary)
+uv run scripts/dev.py ota        # send the last build to the board, wait for the reboot
+uv run scripts/dev.py check      # smoke test only: pages 200, API JSON, gzip css, DNS blocks doubleclick.net
+uv run scripts/dev.py usb        # first flash / recovery over USB (--port COMx, --dry-run)
 ```
-Board on the home LAN: `192.168.50.62` (override `-Ip`); panel password via `-Pass` or `$env:P5_PASS` (none now).
-pio: `C:\Users\san40\.platformio\penv\Scripts\pio.exe` (Python 3.11 penv). Flash use ≈ 90% of the 1.5 MB app partition — watch it.
-(`dev.ps1` is being ported to `uv run scripts/dev.py` — prefer that once it exists.)
+Without uv, `python scripts/dev.py ...` works the same (stdlib only).
+Board on the home LAN: `192.168.50.62` (override `--ip`); panel password via `--pass` or env `P5_PASS` (none now).
+pio: found at `~/.platformio/penv/Scripts/pio.exe` (Windows), `~/.platformio/penv/bin/pio` (macOS/Linux) or on PATH. Flash use ≈ 90% of the 1.5 MB app partition — watch it.
 
 ## Code map (`src/`, ~2.5k lines)
 | File | What |
