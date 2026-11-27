@@ -10,6 +10,18 @@ Public repo: github.com/san40pan40/p5-portal (MIT). Plan / roadmap: `TODO.md` �
 - Commit identity is repo-local (already set). The user pushes (`git push`) — shell cannot enter credentials.
 - Keep changes small and in the existing style; no new libraries without asking.
 
+## Workflow (the main session is the curator — the user should not need to manage models)
+When the user says "далі", "next", "зроби пункт N" or describes a feature:
+1. Pick the task (next unchecked item in `TODO.md` if not named). Do not read the code yourself beyond what is needed to split it.
+2. Non-trivial (several modules, new storage format, networking, tight flash/RAM) → **p5-architect** (Opus) for a plan. Trivial → skip.
+3. Each step → **p5-coder** (Sonnet): pass the step text + the relevant plan lines; it builds, flashes and checks.
+   Independent steps may run in parallel only if they touch different files.
+4. Feature finished → **p5-reviewer** once; send real findings back to p5-coder.
+5. Commit (English message), update `TODO.md` (tick the item), tell the user in Ukrainian in ≤ 8 lines what changed and to `git push`.
+Small questions, one-line fixes, explanations → answer directly, no agents.
+Escalate to the user only for real decisions (UX choice, breaking settings format, flash space running out).
+When a feature is done, suggest `/clear` before the next one (fresh context is cheaper).
+
 ## Build / flash / test (use the script — it prints only what matters)
 ```
 powershell -File scripts/dev.ps1            # build + OTA + smoke test (default)
