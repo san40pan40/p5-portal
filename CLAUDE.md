@@ -5,10 +5,19 @@ Public repo: github.com/san40pan40/p5-portal (MIT). Plan / roadmap: `TODO.md` �
 
 ## Rules
 - Reply to the user in **Ukrainian**; code, comments, docs, commits in **English**.
-- UI strings: never hard-code text in pages — add `X(ID, "uk", "en")` to `src/i18n_strings.h` and use `T(ID)`.
+- UI is **English only** (Ukrainian was dropped to save flash; no downloadable languages). Never hard-code text in pages — add it to `src/i18n_strings.h` and use `T(ID)`.
 - Never commit or read `dump/`, `tools/`, `.pio/` (third-party firmware dumps, backups, build output).
-- Commit identity is repo-local (already set). The user pushes (`git push`) — shell cannot enter credentials.
+- Commit identity is repo-local (already set). **Claude pushes** after each commit (`GIT_TERMINAL_PROMPT=0 git push`). Tags / GitHub releases / running workflows publish things — ask first.
+- Local scripts: **Python, run with `uv run scripts/<x>.py`** (PEP 723 header, stdlib), must work on Windows and macOS (the user will continue on a Mac). No new PowerShell/bash scripts.
+- GitHub CLI: `gh` (Windows: `C:\Program Files\GitHub CLI\gh.exe`), logged in as the repo owner.
 - Keep changes small and in the existing style; no new libraries without asking.
+- When the user states a lasting rule or preference ("from now on", "always", tooling, language, workflow), record it here in Rules right away.
+
+## Decisions (keep unless the user changes them)
+- Partition table `partitions_p5.csv`: 2 × 1.5 MB app, 960 KB LittleFS, no coredump. Changing it needs a USB flash and wipes LittleFS (export rules first).
+- Updates: HTTPS from GitHub releases (`/releases/latest` redirect), built-in Mozilla CA bundle. Releases are built by `.github/workflows/release.yml` on `v*` tags.
+- Preset blocklist: one merged list `p5.bin` (48-bit hashes) built by `scripts/build_lists.py` via the manual `blocklists` workflow, published to the `lists` pre-release (never "latest"); rebuilt only when an upstream list changed. Board keeps it in PSRAM.
+- No ArduinoJson: own minimal JSON reader. Own small UI component system in `src/web/style.css` (spacing scale, tags, switches, button roles) — reuse it, keep pages consistent.
 
 ## Workflow (the main session is the curator — the user should not need to manage models)
 When the user says "далі", "next", "зроби пункт N" or describes a feature:
@@ -17,7 +26,7 @@ When the user says "далі", "next", "зроби пункт N" or describes a 
 3. Each step → **p5-coder** (Sonnet): pass the step text + the relevant plan lines; it builds, flashes and checks.
    Independent steps may run in parallel only if they touch different files.
 4. Feature finished → **p5-reviewer** once; send real findings back to p5-coder.
-5. Commit (English message), update `TODO.md` (tick the item), tell the user in Ukrainian in ≤ 8 lines what changed and to `git push`.
+5. Commit (English message), update `TODO.md` (tick the item), push, tell the user in Ukrainian in ≤ 8 lines what changed.
 Small questions, one-line fixes, explanations → answer directly, no agents.
 Escalate to the user only for real decisions (UX choice, breaking settings format, flash space running out).
 When a feature is done, suggest `/clear` before the next one (fresh context is cheaper).
@@ -30,7 +39,8 @@ powershell -File scripts/dev.ps1 check      # smoke test only: pages 200 + DNS b
 powershell -File scripts/dev.ps1 usb        # first flash / recovery over USB
 ```
 Board on the home LAN: `192.168.50.62` (override `-Ip`); panel password via `-Pass` or `$env:P5_PASS` (none now).
-pio: `C:\Users\san40\.platformio\penv\Scripts\pio.exe` (Python 3.11 penv). Flash use ≈ 88% of the app partition — watch it.
+pio: `C:\Users\san40\.platformio\penv\Scripts\pio.exe` (Python 3.11 penv). Flash use ≈ 90% of the 1.5 MB app partition — watch it.
+(`dev.ps1` is being ported to `uv run scripts/dev.py` — prefer that once it exists.)
 
 ## Code map (`src/`, ~2.5k lines)
 | File | What |
