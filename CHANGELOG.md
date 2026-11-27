@@ -14,7 +14,7 @@ The release workflow copies the section of a version into the notes of its GitHu
 - `CHANGELOG.md`. The release workflow uses it for the release notes.
 
 ### Changed
-- The panel is in English only. The language switch is removed. This makes the firmware 15 KB smaller.
+- The panel is in English only. The panel has no language switch now. This makes the firmware 15 KB smaller.
 - During a daily update of the preset blocklist, the old list continues to block. If the download fails, the board tries again after 1 hour.
 - The DNS page shows the download progress of the preset blocklist without a manual reload.
 - The update check shows "older than this build" when the running firmware is newer than the latest release.
@@ -25,7 +25,7 @@ The release workflow copies the section of a version into the notes of its GitHu
 ### Important
 - This version changes the partition table: 2 × 1.5 MB for firmware, 960 KB for files.
 - A board with older firmware needs one installation over USB. OTA cannot change the partition table.
-- The USB installation erases the rule lists. The settings stay.
+- The USB installation removes the rule lists. The settings stay.
 
 ### Added
 - Several uplink networks (up to 5). Each network has its own password and its own static-IP settings.

@@ -17,7 +17,7 @@ INSTALL = """### How to install
 - **Online:** in the panel, go to **Settings → System**. Push **Check for updates**, then **Install**.
 - **File:** download `firmware.bin` below. In the panel, go to **Settings → System** and upload the file.
 - **First installation, or a board with firmware older than 0.2.0:** install over USB once.
-  OTA cannot change the partition table. Export your rule lists first, because the USB installation erases them.
+  OTA cannot change the partition table. Export your rule lists first, because the USB installation removes them.
 """
 
 

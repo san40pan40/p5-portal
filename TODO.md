@@ -2,27 +2,25 @@
 
 ## Done
 - [x] Refactor into modules, English comments, README, MIT license
-- [x] Web UI in Ukrainian and English (switch in the header and in Settings, no restart)
 - [x] OTA upload from the browser (verified over the home network)
-- [x] Several uplink networks: list of known networks with per-network static IP, strongest-network pick + roaming, nearby scan
-- [x] Settings redesign (per-card forms, no restart except AP), consistent layout/components, toggle switches
-- [x] Lighter UI: live status via `/api/status`, streamed pages, gzipped CSS/JS; 1-hour graphs (CPU, RAM, clients, RSSI, DNS) + top-10
+- [x] Several uplink networks: list of known networks with per-network static IP, strongest-network pick, roaming, nearby scan
+- [x] Settings redesign (one form per card, restart only for AP changes), one layout and component system, switches
+- [x] Lighter UI: live status via `/api/status`, pages sent in parts, gzip CSS/JS. 1-hour graphs (CPU, RAM, clients, RSSI, DNS) and top 10 tables
+- [x] Releases and update check: version from `git describe`, release workflow on `v*` tags, installation over HTTPS from the panel
+- [x] New partition table (2 × 1.5 MB app, 960 KB LittleFS), rule export and import
+- [x] Preset blocklist: one merged 48-bit list from StevenBlack and HaGeZi Light. A manual workflow builds it. The board keeps it in PSRAM and checks for updates each day.
+- [x] English-only UI (the Ukrainian text was removed to save flash)
+- [x] CHANGELOG.md and release notes from it
 
 ## Next
-1. **Releases + "check for updates"**
-   - firmware version from `git describe` (PlatformIO extra script)
-   - manual GitHub releases with `firmware.bin` (GitHub Actions later)
-   - panel button: check the latest release and install it over HTTPS (repo is public — no token)
-2. **Preset blocklists from this repo**
-   - `blocklists/sources.json` + `scripts/build_lists.py`; a GitHub Action builds `.bin` (sorted 64-bit FNV-1a hashes)
-     + `index.json` and publishes them to a rolling `lists` release (no binaries in git history)
-   - panel: toggle a list on → download to LittleFS; off → delete; daily update check
-   - lookup: binary search in the flash file (≈ 150k domains fit), user list stays in RAM
-   - record source + license of each list in `index.json`
+1. Port `scripts/dev.ps1` to Python (`uv run scripts/dev.py`), so that development works on macOS.
 
 ## Ideas / known gaps
 - DNS over TCP (large answers > 1232 bytes)
-- Retry a timed-out upstream query via a second resolver (router / ISP drops DNS bursts to public resolvers)
-- Optional power saving (lower CPU clock / TX power)
+- Retry a timed-out upstream query through a second resolver (some routers or providers drop many DNS queries to public resolvers)
+- Allowlist for the preset blocklist (an "Allow" button for preset hits in the query log)
+- Panel security: Digest auth instead of Basic, option "panel only from the access point", delay after failed logins. HTTPS for the panel is not planned: self-signed certificate warnings, about 40 KB RAM per connection.
+- Other chips: classic ESP32 with PSRAM is easy. C3/C6 (no PSRAM, one core) need a list lookup in flash.
+- Optional power saving (lower CPU clock or TX power)
 - Unit tests for `RuleList` on the PC (`pio test -e native`)
-- `.vscode/extensions.json.optional` is a PlatformIO artifact — can be removed from the repo
+- `.vscode/extensions.json.optional` is a PlatformIO artifact. It can be removed from the repo.
