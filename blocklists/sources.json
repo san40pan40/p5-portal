@@ -1,0 +1,20 @@
+[
+  {
+    "id": "stevenblack",
+    "name": "StevenBlack hosts (base)",
+    "url": "https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts",
+    "format": "hosts",
+    "license": "MIT",
+    "homepage": "https://github.com/StevenBlack/hosts",
+    "notice_url": "https://raw.githubusercontent.com/StevenBlack/hosts/master/license.txt"
+  },
+  {
+    "id": "hagezi-light",
+    "name": "HaGeZi Multi LIGHT",
+    "url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/light-onlydomains.txt",
+    "format": "domains",
+    "license": "GPL-3.0",
+    "homepage": "https://github.com/hagezi/dns-blocklists",
+    "notice_url": "https://raw.githubusercontent.com/hagezi/dns-blocklists/main/LICENSE"
+  }
+]

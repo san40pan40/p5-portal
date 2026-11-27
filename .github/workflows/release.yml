@@ -1,0 +1,67 @@
+# Builds the firmware for a version tag and publishes it as a GitHub release with the asset "firmware.bin"
+# (the board's update check reads /releases/latest and downloads that asset).
+# Cut a release: git tag v0.x.y && git push --tags   (a tag with "-", e.g. v0.3.0-rc1, becomes a pre-release)
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to (re)build and publish, e.g. v0.3.0"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag && format('refs/tags/{0}', inputs.tag) || github.ref }}
+          fetch-depth: 0   # full history + tags: scripts/version.py uses `git describe --tags`
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: pio-${{ runner.os }}-${{ hashFiles('platformio.ini', 'partitions_p5.csv') }}
+          restore-keys: pio-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install --upgrade platformio
+
+      - name: Build
+        run: |
+          pio run -e esp32-s3-zero
+          cat src/version_gen.h
+          grep -q "\"$TAG\"" src/version_gen.h || { echo "FW_VERSION does not match tag $TAG"; exit 1; }
+
+      - name: Publish release
+        run: |
+          BIN=.pio/build/esp32-s3-zero/firmware.bin
+          ls -l "$BIN"
+          NOTES="Install: Settings -> Firmware update (OTA) in the panel, or the update check. Note: the first install on a board that still has the old (default) partition table must be done over USB once (scripts/dev.ps1 usb or pio run -t upload); after that OTA works."
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$BIN" --clobber
+          else
+            case "$TAG" in
+              *-*) KIND="--prerelease" ;;
+              *)   KIND="--latest" ;;
+            esac
+            gh release create "$TAG" "$BIN" --verify-tag --title "$TAG" --generate-notes --notes "$NOTES" $KIND
+          fi

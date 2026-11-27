@@ -20,3 +20,6 @@ src/web/assets_gz.h
 
 # Generated at build time by scripts/version.py
 src/version_gen.h
+
+# Built by scripts/build_lists.py (published to the "lists" GitHub release, not committed)
+blocklists/out/

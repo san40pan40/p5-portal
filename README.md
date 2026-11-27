@@ -45,6 +45,27 @@ A secondary DNS such as 8.8.8.8 keeps the internet working if the board is offli
 
 **Settings → Firmware update (OTA)** → choose `firmware.bin` from a [release](../../releases) or from `.pio/build/esp32-s3-zero/` after building. Settings and lists are preserved.
 
+## Releases
+
+Releases are built by GitHub Actions (`.github/workflows/release.yml`): pushing a version tag compiles the firmware and publishes it as `firmware.bin` in a new release.
+
+```
+git tag v0.x.y && git push --tags
+```
+
+A tag with a suffix (`v0.x.y-rc1`) becomes a pre-release, which the panel's update check ignores.
+
+## Blocklists
+
+Preset blocklists are not stored in git. `.github/workflows/blocklists.yml` rebuilds them daily with `scripts/build_lists.py` from the upstream lists in `blocklists/sources.json` and publishes them to the [`lists`](../../releases/tag/lists) pre-release: a compact `<id>.bin` per list (sorted 64-bit FNV-1a hashes of the domains) plus `index.json`.
+
+| List | License |
+|---|---|
+| [StevenBlack hosts](https://github.com/StevenBlack/hosts) (base) | MIT |
+| [HaGeZi Multi LIGHT](https://github.com/hagezi/dns-blocklists) | GPL-3.0 |
+
+Each list keeps its upstream license; the license texts and `NOTICE.txt` are published next to the files. Build locally: `python scripts/build_lists.py` (output in `blocklists/out/`).
+
 ## Project layout
 
 ```

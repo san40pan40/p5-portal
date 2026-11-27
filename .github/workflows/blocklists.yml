@@ -1,0 +1,51 @@
+# Rebuilds the preset blocklists (scripts/build_lists.py) from the upstream lists in blocklists/sources.json
+# and publishes <id>.bin, index.json and the license/notice files as assets of the rolling release "lists".
+# The board downloads them from https://github.com/<owner>/<repo>/releases/download/lists/<file>.
+name: blocklists
+
+on:
+  schedule:
+    - cron: "17 3 * * *"   # daily 03:17 UTC
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "blocklists/**"
+      - "scripts/build_lists.py"
+      - ".github/workflows/blocklists.yml"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: blocklists
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build lists
+        run: python scripts/build_lists.py --out out
+
+      # The "lists" release must NEVER become the repository's "latest" release: the firmware update
+      # check reads /releases/latest and expects a firmware tag there. A pre-release is never "latest",
+      # and --latest=false keeps it out even if the pre-release flag is ever removed.
+      - name: Publish to release "lists"
+        run: |
+          ls -l out
+          if ! gh release view lists >/dev/null 2>&1; then
+            gh release create lists --title "Blocklists" --prerelease --latest=false \
+              --target "${{ github.sha }}" \
+              --notes "Preset blocklists for P5 Portal, rebuilt daily by .github/workflows/blocklists.yml. Not a firmware release. Each list keeps its upstream license: see NOTICE.txt and the *.LICENSE.txt files."
+          fi
+          gh release upload lists out/* --clobber
