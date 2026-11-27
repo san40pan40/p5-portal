@@ -26,18 +26,24 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Build lists
-        run: python scripts/build_lists.py --out out
+      # Compare with the published index.json: if the upstream lists and the builder did not change,
+      # the script stops early (changed=false) and nothing is built or uploaded.
+      - name: Build lists (only if something changed)
+        id: build
+        run: |
+          gh release download lists -p index.json -O prev-index.json 2>/dev/null || echo "no previous index"
+          python scripts/build_lists.py --out out --prev prev-index.json
 
       # The "lists" release must NEVER become the repository's "latest" release: the firmware update
       # check reads /releases/latest and expects a firmware tag there. A pre-release is never "latest",
       # and --latest=false keeps it out even if the pre-release flag is ever removed.
-      - name: Publish to release "lists"
+      - name: Publish changed files to release "lists"
+        if: steps.build.outputs.changed == 'true'
         run: |
           ls -l out
           if ! gh release view lists >/dev/null 2>&1; then
             gh release create lists --title "Blocklists" --prerelease --latest=false \
               --target "${{ github.sha }}" \
-              --notes "Preset blocklists for P5 Portal, rebuilt daily by .github/workflows/blocklists.yml. Not a firmware release. Each list keeps its upstream license: see NOTICE.txt and the *.LICENSE.txt files."
+              --notes "Preset blocklists for P5 Portal, rebuilt by .github/workflows/blocklists.yml when an upstream list changes. Not a firmware release. Each list keeps its upstream license: see NOTICE.txt and the *.LICENSE.txt files."
           fi
-          gh release upload lists out/* --clobber
+          (cd out && xargs -a changed.txt gh release upload lists --clobber)

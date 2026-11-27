@@ -25,7 +25,11 @@
 #   12 u32     crc32 (zlib.crc32) of the hash payload that follows
 #   16 u64[count] hashes, sorted ascending, unique
 #
-# index.json: {"v":1,"lists":[{"id","name","license","homepage","count","bytes","crc","updated"}, ...]}
+# index.json: {"v":1,"gen":"<sha>","lists":[{"id","name","license","homepage","count","bytes","crc","updated","src"}, ...]}
+#   gen = sha256 of this script + sources.json; src = sha256 of the raw upstream text.
+# --prev <old index.json>: if gen and every src are unchanged, nothing is built ("changed=false" goes to
+#   $GITHUB_OUTPUT); otherwise only lists whose source changed get a new "updated" date and are listed in
+#   <out>/changed.txt (index.json and NOTICE.txt are always listed then), so CI uploads only those files.
 #   flat objects only; crc is the payload crc32 as an unsigned decimal number, bytes is the .bin size,
 #   updated is the build date (UTC, YYYY-MM-DD).
 import argparse
@@ -159,6 +163,7 @@ def main():
     ap.add_argument("--out", default=DEFAULT_OUT, help="output directory (default blocklists/out)")
     ap.add_argument("--sources", default=SOURCES, help="sources.json path")
     ap.add_argument("--local", help="read <DIR>/<id>.txt instead of downloading (tests)")
+    ap.add_argument("--prev", help="previous index.json: skip the build if nothing changed")
     ap.add_argument("--sample", nargs="*", default=["doubleclick.net", "ad.de.doubleclick.net", "example.com"],
                     help="domains whose hashes are printed (for checking the firmware side)")
     args = ap.parse_args()
@@ -168,27 +173,66 @@ def main():
     os.makedirs(args.out, exist_ok=True)
     today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")
 
-    lists = []
-    notice = ["P5 Portal preset blocklists", "",
-              "Each <id>.bin holds 64-bit FNV-1a hashes of the domains of an upstream list (see",
-              "scripts/build_lists.py in https://github.com/san40pan40/p5-portal). The upstream",
-              "lists, their authors and licenses:", ""]
+    import hashlib
+    with open(os.path.abspath(__file__), "rb") as f:
+        gen_h = hashlib.sha256(f.read())
+    with open(args.sources, "rb") as f:
+        gen_h.update(f.read())
+    gen = gen_h.hexdigest()[:16]
+    prev = {}
+    prev_gen = None
+    if args.prev and os.path.exists(args.prev):
+        try:
+            with open(args.prev, encoding="utf-8") as f:
+                pj = json.load(f)
+            prev_gen = pj.get("gen")
+            prev = {l["id"]: l for l in pj.get("lists", [])}
+        except Exception as e:  # noqa: BLE001 - a bad old index just means "rebuild"
+            print("previous index unreadable (%s): full rebuild" % e)
+
+    texts = {}
     failed = False
     for src in sources:
         sid = src["id"]
         url = os.path.join(args.local, sid + ".txt") if args.local else src["url"]
         try:
-            text = fetch(url).decode("utf-8", errors="replace")
+            texts[sid] = fetch(url)
         except Exception as e:  # noqa: BLE001 - report and fail the build
             print("ERROR: %s: cannot read %s: %s" % (sid, url, e))
             failed = True
-            continue
+    if failed:
+        print("FAILED")
+        sys.exit(1)
+    shas = {sid: hashlib.sha256(t).hexdigest()[:16] for sid, t in texts.items()}
+    same_gen = prev_gen == gen
+    unchanged = {sid for sid in shas if same_gen and sid in prev and prev[sid].get("src") == shas[sid]}
+    gh_out = os.environ.get("GITHUB_OUTPUT")
+    if len(unchanged) == len(sources) and len(prev) == len(sources):
+        print("UNCHANGED: upstream lists and builder are the same as in the previous index; nothing to do")
+        if gh_out:
+            with open(gh_out, "a") as f:
+                f.write("changed=false\n")
+        return
+
+    lists = []
+    changed_files = ["index.json", "NOTICE.txt"]
+    notice = ["P5 Portal preset blocklists", "",
+              "Each <id>.bin holds 64-bit FNV-1a hashes of the domains of an upstream list (see",
+              "scripts/build_lists.py in https://github.com/san40pan40/p5-portal). The upstream",
+              "lists, their authors and licenses:", ""]
+    for src in sources:
+        sid = src["id"]
+        text = texts[sid].decode("utf-8", errors="replace")
         info, collisions = build(src, text, args.out)
         for h, a, b in collisions:
             print("COLLISION %016x: %s / %s" % (h, a, b))
             failed = True
         lists.append({"id": sid, "name": src["name"], "license": src["license"], "homepage": src["homepage"],
-                      "count": info["count"], "bytes": info["bytes"], "crc": info["crc"], "updated": today})
+                      "count": info["count"], "bytes": info["bytes"], "crc": info["crc"],
+                      "updated": prev[sid].get("updated", today) if sid in unchanged else today,
+                      "src": shas[sid]})
+        if sid not in unchanged:
+            changed_files.append(sid + ".bin")
         notice += ["%s: %s" % (sid, src["name"]), "  source:   %s" % src["url"],
                    "  homepage: %s" % src["homepage"], "  license:  %s" % src["license"]]
         if src.get("notice_url"):
@@ -197,13 +241,15 @@ def main():
                 with open(os.path.join(args.out, lic), "wb") as f:
                     f.write(fetch(src["notice_url"]))
                 notice.append("  license text: %s" % lic)
+                if sid not in unchanged:
+                    changed_files.append(lic)
             except Exception as e:  # noqa: BLE001
                 print("ERROR: %s: cannot read license %s: %s" % (sid, src["notice_url"], e))
                 failed = True
         notice.append("")
 
     with open(os.path.join(args.out, "index.json"), "w", encoding="utf-8", newline="\n") as f:
-        f.write('{"v":1,"lists":[\n')
+        f.write('{"v":1,"gen":"%s","lists":[\n' % gen)
         f.write(",\n".join(json.dumps(l, ensure_ascii=True, separators=(",", ":")) for l in lists))
         f.write("\n]}\n")
     with open(os.path.join(args.out, "NOTICE.txt"), "w", encoding="utf-8", newline="\n") as f:
@@ -214,7 +260,12 @@ def main():
     if failed:
         print("FAILED")
         sys.exit(1)
-    print("OK: %d lists -> %s" % (len(lists), args.out))
+    with open(os.path.join(args.out, "changed.txt"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("\n".join(changed_files) + "\n")
+    if gh_out:
+        with open(gh_out, "a") as f:
+            f.write("changed=true\n")
+    print("OK: %d lists -> %s; changed: %s" % (len(lists), args.out, " ".join(changed_files)))
 
 
 if __name__ == "__main__":
