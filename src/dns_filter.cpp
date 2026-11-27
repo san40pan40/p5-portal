@@ -1,6 +1,7 @@
 #include "dns_filter.h"
 #include "anti_bypass.h"      // AntiBypass::enabled() — whether the DoH list and the canary apply
 #include "i18n.h"             // translated reasons for a rejected upstream
+#include "metrics.h"          // charts history + top tables
 #include <esp_random.h>
 #include <iterator>           // std::size
 #include <lwip/prot/dns.h>    // DNS constants from lwIP: SIZEOF_DNS_HDR, DNS_RRTYPE_A, ...
@@ -163,6 +164,7 @@ void DnsFilter::handleQuery(int len, IPAddress ip, uint16_t port) {
     }
   }
   addLog(name, rule, src, ip);
+  Metrics::dnsQuery((uint32_t)ip, rule ? name : nullptr);
 
   if (rule) {
     statBlocked++;
@@ -283,6 +285,8 @@ void DnsFilter::handleUpstreamReply(int len, IPAddress from) {
   _srv.write(_buf, len);
   _srv.endPacket();
   p->used = false;
+  statUpMs += millis() - p->ms;
+  statUpN++;
 }
 
 // ================================================================ log

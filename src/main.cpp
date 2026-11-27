@@ -18,6 +18,7 @@
 #include "app_network.h"
 #include "app_board.h"
 #include "anti_bypass.h"
+#include "metrics.h"
 #include "web/web.h"
 
 WebServer server(80);
@@ -53,5 +54,6 @@ void loop() {
   Net::loop();
   Board::loop();
   AntiBypass::loop();
+  Metrics::loop();                          // chart samples every 10 s
   delay(1);                                 // yield the CPU to other tasks (Wi-Fi, netcheck)
 }

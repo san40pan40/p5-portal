@@ -16,7 +16,7 @@ namespace Web {
 void begin();                 // register all pages and start the HTTP server
 
 // Each page group registers its own routes (defined in page_*.cpp)
-void registerStatusPage();
+void registerStatusPage();   // also GET /api/status
 void registerDnsPage();
 void registerGuardPage();
 void registerConfigPage();
@@ -29,12 +29,18 @@ void routeUpload(const char *uri, void (*done)(), void (*upload)());
 bool accessOk();              // the single access rule, without sending any response
 
 // ---- Page output ----
-String pageStart(const char *title, const char *active, const char *extraHead = "");
-extern const char PAGE_END[];
+// Streamed pages: beginPage() (HTTP header + frame), then build a card in a String and
+// flushPage() it (sent only if longer than `over`; also serves DNS meanwhile), endPage() closes.
+void beginPage(const char *title, const char *active, int code = 200, const char *extraHead = "");
+void flushPage(String &p, size_t over = 0);
+const char *hdrState(const char *&cls);         // header text; cls = colour class (ok/warn/bad/mut)
+void endPage(String &p);
+// Small pages built in one String
 void sendPage(const char *title, const char *active, const String &body, int code = 200,
               const char *extraHead = "");
 void sendError(const String &msg, const char *back);
-void sendRestartPage(const char *heading);       // reply, then reboot
+// Reply, then reboot. apSsid set: the AP name/password changed — tell the user to reconnect to it.
+void sendRestartPage(const char *heading, const String &apSsid = "");
 void redirectMsg(const char *url, const String &msg);      // 303 + green note on the next page
 void redirectBack(const char *def, const String &msg);     // to ?back= (our pages only) or def
 
@@ -44,10 +50,18 @@ String urlEncode(const String &s);
 String postBtn(const char *action, const char *label, const char *cls = "", const char *name = nullptr,
                const String &val = "", const char *confirmText = nullptr);
 String tag(const char *text, const char *cls = "");
-String tile(const String &value, const String &label, const char *cls = "");
+// vk / lk: data-k keys of the value / label, updated live by app.js from /api/status
+String tile(const String &value, const String &label, const char *cls = "", const char *vk = nullptr,
+            const char *lk = nullptr);
 String row(const String &k, const String &v);
-String toggleRow(const char *title, bool on, const char *action);
+String liveSpan(const char *key, const String &v);     // <span data-k=key>v</span>
+String toggleRow(const char *title, bool on, const char *action);   // on/off switch form
 String saveAlert(const RuleList &l);
+// History charts card (drawn by app.js from /api/hist?set=...): histStart, chart()..., "</div></section>".
+// keys = series of /api/hist (comma-separated), legend = series names split by '|' ("" = one series).
+// total: per-interval counters — the header shows the sum for the hour (Σ), not the last 10 s (often 0)
+String histStart(const char *set, const char *title);
+String chart(const char *keys, const char *title, const char *legend = "", bool total = false);
 
 // ---- Shared actions ----
 void ruleAdd(RuleList &l, const char *page);
@@ -61,47 +75,8 @@ const char *rssiText(int rssi);
 const char *rssiClass(int rssi);
 String      macStr(const uint8_t *m);
 
-// Rule list table: search (?q=), pages of 50 (?p=), a "Delete" button per rule.
-// flush() lets big pages be sent in chunks.
-template <class F>
-void ruleTable(String &p, const RuleList &l, const char *page, const char *delAction, F flush) {
-  const size_t PER = 50;
-  String q = server.arg("q");
-  q.toLowerCase();
-  p += "<form method=GET action='" + String(page) + "#list' class=row style='margin-bottom:.6em'>"
-       "<input name=q value='" + esc(q) + "' placeholder='" + T(LIST_SEARCH) + "'><button class='g s'>" +
-       T(LIST_FIND) + "</button></form>";
-
-  size_t matched;
-  size_t pg = server.arg("p").toInt();
-  auto rules = l.page(q, pg * PER, PER, matched);
-  size_t pages = matched ? (matched + PER - 1) / PER : 1;
-  if (pg >= pages) {                     // page number out of range (the list shrank)
-    pg = pages - 1;
-    rules = l.page(q, pg * PER, PER, matched);
-  }
-
-  String pager;                          // shown above and below the table
-  if (pages > 1) {
-    String base = String(page) + "?q=" + urlEncode(q) + "&p=";
-    pager = "<div class=row style='margin:.5em 0'>";
-    if (pg > 0) pager += "<a class='btn g s' href='" + base + String(pg - 1) + "#list'>" + T(LIST_PREV) + "</a>";
-    char info[96];
-    snprintf(info, sizeof(info), T(LIST_PAGE_FMT), (unsigned)(pg + 1), (unsigned)pages, (unsigned)matched);
-    pager += String("<span class=hint>") + info + "</span>";
-    if (pg + 1 < pages) pager += "<a class='btn g s' href='" + base + String(pg + 1) + "#list'>" + T(LIST_NEXT) + "</a>";
-    pager += "</div>";
-  }
-
-  p += pager + "<table>";
-  for (const std::string *r : rules) {
-    String rule(r->c_str());
-    p += "<tr><td>" + esc(rule) + "</td><td style='text-align:right'>" +
-         postBtn(delAction, T(DELETE), "g s", "domain", rule) + "</td></tr>";
-    flush();
-  }
-  if (rules.empty()) p += String("<tr><td class=mut>") + (q.length() ? T(LIST_NOTHING_FOUND) : T(LIST_EMPTY)) + "</td></tr>";
-  p += "</table>" + pager;
-}
+// Rule list table: search (?q=), pages of 20 (?p=), a ghost "✕" (delete) button per rule.
+// Streamed: sends p in chunks (flushPage) while the rows are built.
+void ruleTable(String &p, const RuleList &l, const char *page, const char *delAction);
 
 }  // namespace Web

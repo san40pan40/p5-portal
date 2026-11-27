@@ -2,63 +2,21 @@
 #include <WiFi.h>
 #include "app_config.h"
 #include "app_network.h"
+#include "assets_gz.h"
 
 namespace Web {
 
-// ================================================================ styles
-// Served as a separate /style.css that the browser caches, so pages stay small and fast
-static const char CSS[] = R"CSS(
-:root{--bg:#0f1b2d;--card:#16263d;--line:#243a57;--txt:#e7eef8;--mut:#8aa4c4;--acc:#3b82f6;--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--hd:#0b1524}
-*{box-sizing:border-box}
-body{margin:0;font:15px/1.45 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--txt)}
-header{position:sticky;top:0;z-index:9;background:var(--hd);border-bottom:1px solid var(--line)}
-.top{display:flex;align-items:center;gap:.5em;padding:.55em 1em;max-width:980px;margin:auto}
-.brand{font-weight:700;font-size:1.1em;margin-right:auto;white-space:nowrap}
-.dot{display:inline-block;width:.7em;height:.7em;border-radius:50%;margin-right:.45em;vertical-align:middle}
-.chip{font-size:.78em;padding:.2em .65em;border-radius:99px;background:var(--card);color:var(--mut);white-space:nowrap}
-nav{display:flex;gap:.1em;padding:0 .5em;max-width:980px;margin:auto;overflow-x:auto}
-nav a{color:var(--mut);text-decoration:none;padding:.55em .9em;border-bottom:2px solid transparent;white-space:nowrap}
-nav a:hover{color:var(--txt)}
-nav a.on{color:var(--txt);border-bottom-color:var(--acc)}
-main{max-width:980px;margin:auto;padding:1em}
-.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:1em;align-items:start}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:1em;margin-bottom:1em}
-.grid .card{margin-bottom:0}
-.card h3{margin:0 0 .7em;font-size:.82em;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}
-.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.7em;margin-bottom:1em}
-.tile{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:.75em .9em}
-.tile b{display:block;font-size:1.35em;line-height:1.2}
-.tile span{color:var(--mut);font-size:.8em}
-table{width:100%;border-collapse:collapse;font-size:.92em}
-td,th{padding:.45em .35em;border-bottom:1px solid var(--line);text-align:left;vertical-align:top;word-break:break-word}
-th{color:var(--mut);font-weight:500;font-size:.85em}
-td.k{color:var(--mut);width:42%}
-tr:last-child td{border-bottom:0}
-tr.b td{color:#fca5a5}
-input,textarea{width:100%;padding:.6em;margin:.25em 0 .8em;border-radius:8px;border:1px solid var(--line);background:var(--hd);color:var(--txt);font:inherit}
-input[type=checkbox]{width:auto;margin:0 .4em 0 0;vertical-align:middle}
-label{font-size:.85em;color:var(--mut)}
-button,.btn{background:var(--acc);color:#fff;border:0;border-radius:8px;padding:.5em 1em;font:inherit;cursor:pointer;text-decoration:none;display:inline-block}
-button:hover,.btn:hover{filter:brightness(1.15)}
-.r{background:var(--bad)}.g{background:#334155}.s{padding:.25em .65em;font-size:.85em}
-form.i{display:inline;margin:0}
-.row{display:flex;gap:.5em;align-items:center;flex-wrap:wrap}
-.row input{margin:0;flex:1;min-width:140px}
-.ok{color:var(--ok)}.warn{color:var(--warn)}.bad{color:var(--bad)}.mut{color:var(--mut)}
-.tag{display:inline-block;font-size:.75em;font-weight:600;padding:.12em .55em;border-radius:99px;background:#334155;color:var(--txt)}
-.tag.ok{background:#14532d;color:#bbf7d0}.tag.bad{background:#7f1d1d;color:#fecaca}.tag.warn{background:#78350f;color:#fde68a}
-.alert{background:#3b2a0b;border:1px solid var(--warn);border-radius:10px;padding:.6em .85em;margin-bottom:1em}
-.note{background:#0f2e1d;border:1px solid var(--ok);border-radius:10px;padding:.6em .85em;margin-bottom:1em}
-.hint{color:var(--mut);font-size:.85em;margin:.4em 0}
-code{background:var(--hd);padding:.1em .35em;border-radius:4px}
-details summary{cursor:pointer;color:var(--mut);margin:.3em 0}
-h2{margin:.2em 0 .8em}
-)CSS";
-
-static void handleCss() {
+// ================================================================ styles and script
+// Readable sources: src/web/style.css and app.js. scripts/embed_assets.py gzips them into
+// assets_gz.h at build time; they are served compressed (every browser accepts gzip) and cached.
+static void sendGz(const char *type, const uint8_t *data, size_t len) {
   server.sendHeader("Cache-Control", "max-age=86400");
-  server.send(200, "text/css", CSS);
+  server.sendHeader("Content-Encoding", "gzip");
+  server.send_P(200, type, (const char *)data, len);
 }
+
+static void handleCss() { sendGz("text/css", STYLE_CSS_GZ, sizeof(STYLE_CSS_GZ)); }
+static void handleJs()  { sendGz("application/javascript", APP_JS_GZ, sizeof(APP_JS_GZ)); }
 
 // ================================================================ access control
 // CSRF protection: any site a client visits could submit a form to our panel, and the browser
@@ -100,9 +58,22 @@ void routeUpload(const char *uri, void (*done)(), void (*upload)()) {
 }
 
 // ================================================================ page frame
-String pageStart(const char *title, const char *active, const char *extraHead) {
+// Header state: dot/chip colour class + text (also sent by /api/status, so it stays live)
+const char *hdrState(const char *&cls) {
+  if (!Config::settings.netCount) { cls = "mut";  return T(HDR_NO_ROUTER_CFG); }
+  if (!Net::staConnected())       { cls = "bad";  return T(HDR_NO_ROUTER); }
+  if (!Net::internetOk())         { cls = "warn"; return T(HDR_NO_INTERNET); }
+  cls = "ok";
+  return T(HDR_ONLINE);
+}
+
+// Pages are streamed: beginPage() sends the HTTP header and the page frame, then each card is
+// built in a small String and sent with flushPage(), endPage() closes. No whole-page String.
+void beginPage(const char *title, const char *active, int code, const char *extraHead) {
+  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+  server.send(code, "text/html; charset=utf-8", "");
   String h;
-  h.reserve(2500);
+  h.reserve(1200);
   h += "<!DOCTYPE html><html lang=";
   h += T(LANG_CODE);
   h += "><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>";
@@ -110,20 +81,17 @@ String pageStart(const char *title, const char *active, const char *extraHead) {
   h += "<title>";
   h += title;
   // ?v=build time: after a firmware update the browser fetches fresh styles, not cached ones
-  h += " · P5 Portal</title><link rel=stylesheet href='/style.css?v=" __DATE__ __TIME__ "'></head><body><header><div class=top>";
+  h += " · P5 Portal</title><link rel=stylesheet href='/style.css?v=" __DATE__ __TIME__ "'>"
+       "<script defer src='/app.js?v=" __DATE__ __TIME__ "'></script></head><body><header><div class=top>";
 
-  const char *col, *txt;
-  if (!Config::settings.staSsid.length()) { col = "var(--mut)";  txt = T(HDR_NO_ROUTER_CFG); }
-  else if (!Net::staConnected())          { col = "var(--bad)";  txt = T(HDR_NO_ROUTER); }
-  else if (!Net::internetOk())            { col = "var(--warn)"; txt = T(HDR_NO_INTERNET); }
-  else                                    { col = "var(--ok)";   txt = T(HDR_ONLINE); }
-  h += "<span class=brand><span class=dot style='background:";
-  h += col;
-  h += "'></span>P5 Portal</span><span class=chip>";
+  const char *cls, *txt = hdrState(cls);
+  h += "<span class=brand><span class='dot ";
+  h += cls;
+  h += "' data-k=hd></span>P5 Portal</span><span class=chip data-k=ht>";
   h += txt;
   h += "</span><span class=chip>";
   h += T(HDR_CLIENTS);
-  h += String(WiFi.softAPgetStationNum()) + "</span>";
+  h += "<span data-k=cl>" + String(WiFi.softAPgetStationNum()) + "</span></span>";
   // Quick language switch: shows the other language, returns to the same page
   h += "<form class=i method=POST action='/lang'><input type=hidden name=back value='";
   h += active;
@@ -145,29 +113,41 @@ String pageStart(const char *title, const char *active, const char *extraHead) {
   }
   h += "</nav></header><main>";
   if (server.hasArg("msg")) h += "<div class=note>" + esc(server.arg("msg")) + "</div>";   // result of the last action
-  return h;
+  server.sendContent(h);
 }
 
-const char PAGE_END[] = "</main></body></html>";
+// An empty chunk would end the chunked response, so it is never sent here
+void flushPage(String &p, size_t over) {
+  if (p.length() <= over) return;
+  server.sendContent(p);
+  p = "";                                        // keeps the buffer for the next card
+  dns.loop();                                    // keep answering DNS while the page is generated
+}
 
-// Sent in chunks (frame, body, end) — no extra copy of the whole page into one string
-void sendPage(const char *title, const char *active, const String &body, int code, const char *extraHead) {
-  server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-  server.send(code, "text/html; charset=utf-8", "");
-  server.sendContent(pageStart(title, active, extraHead));
-  server.sendContent(body);
-  server.sendContent(PAGE_END);
+void endPage(String &p) {
+  p += "</main></body></html>";
+  flushPage(p);
   server.sendContent("");                        // end of the chunked response
+}
+
+void sendPage(const char *title, const char *active, const String &body, int code, const char *extraHead) {
+  beginPage(title, active, code, extraHead);
+  if (body.length()) server.sendContent(body);
+  String e;
+  endPage(e);
 }
 
 void sendError(const String &msg, const char *back) {
   sendPage(T(ERROR_TITLE), "", String("<section class=card><h3>") + T(ERROR_TITLE) + "</h3><p class=bad>" + esc(msg) +
-           "</p><a class=btn href='" + back + "'>" + T(BACK) + "</a></section>", 400);
+           "</p><div class=actions><a class='btn g' href='" + back + "'>" + T(BACK) + "</a></div></section>", 400);
 }
 
-void sendRestartPage(const char *heading) {
-  sendPage(T(RESTART_TITLE), "", String("<section class=card><h3>") + heading + "</h3><p>" + T(RESTART_TEXT) +
-           "</p></section>", 200, "<meta http-equiv=refresh content='12;url=/'>");
+// #rs makes app.js poll the board and reopen "/" as soon as it answers; meta refresh is the fallback
+void sendRestartPage(const char *heading, const String &apSsid) {
+  String b = String("<section class=card><h3>") + heading + "</h3>";
+  if (apSsid.length()) b += String("<div class=alert>") + T(RESTART_CONNECT) + "<b>" + esc(apSsid) + "</b></div>";
+  b += String("<p id=rs>") + T(RESTART_TEXT) + "</p></section>";
+  sendPage(T(RESTART_TITLE), "", b, 200, "<meta http-equiv=refresh content='12;url=/'>");
   delay(800);
   ESP.restart();
 }
@@ -215,7 +195,7 @@ String urlEncode(const String &s) {
 String postBtn(const char *action, const char *label, const char *cls, const char *name,
                const String &val, const char *confirmText) {
   String f = String("<form class=i method=POST action='") + action + "'";
-  if (confirmText) f += String(" onsubmit=\"return confirm('") + confirmText + "')\"";
+  if (confirmText) f += String(" data-confirm='") + esc(confirmText) + "'";   // handled by app.js
   f += ">";
   if (name) f += String("<input type=hidden name=") + name + " value='" + esc(val) + "'>";
   f += String("<button class='") + cls + "'>" + label + "</button></form>";
@@ -224,25 +204,87 @@ String postBtn(const char *action, const char *label, const char *cls, const cha
 
 String tag(const char *text, const char *cls) { return String("<span class='tag ") + cls + "'>" + text + "</span>"; }
 
-String tile(const String &value, const String &label, const char *cls) {
-  return String("<div class=tile><b class='") + cls + "'>" + value + "</b><span>" + label + "</span></div>";
+static String dataK(const char *key) { return key ? String(" data-k=") + key : String(); }
+
+String tile(const String &value, const String &label, const char *cls, const char *vk, const char *lk) {
+  return String("<div class=tile><b class='") + cls + "'" + dataK(vk) + ">" + value + "</b><span" + dataK(lk) + ">" +
+         label + "</span></div>";
 }
+
+String histStart(const char *set, const char *title) {
+  return String("<section class=card data-hist=") + set + " data-a='" + T(HI_AGO) + "' data-b='" + T(HI_NOW) +
+         "'><h3>" + title + "</h3><div class=chs>";
+}
+
+String chart(const char *keys, const char *title, const char *legend, bool total) {
+  return String("<div class=ch data-s=") + keys + (total ? " data-u=1" : "") + " data-t='" + title + "' data-l='" + legend +
+         "'></div>";
+}
+
+String liveSpan(const char *key, const String &v) { return "<span" + dataK(key) + ">" + v + "</span>"; }
 
 String row(const String &k, const String &v) { return "<tr><td class=k>" + k + "</td><td>" + v + "</td></tr>"; }
 
-// "Title [ON] [Turn off]"
+// On/off switch: "[o-] Title  state". The checkbox has no name: the action just flips the setting.
+// app.js submits the form on change; without JS a small button is shown instead.
 String toggleRow(const char *title, bool on, const char *action) {
-  return String("<div class=row><b>") + title + "</b>" + tag(on ? T(ON_CAPS) : T(OFF_CAPS), on ? "ok" : "bad") +
-         postBtn(action, on ? T(TURN_OFF) : T(TURN_ON), on ? "g s" : "s") + "</div>";
+  return String("<form class=row method=POST action='") + action + "'><label class=sw><input type=checkbox" +
+         (on ? " checked" : "") + "><b>" + title + "</b><span class=mut>" + (on ? T(ON_LOWER) : T(OFF_LOWER)) +
+         "</span></label><noscript><button class='g s'>" + (on ? T(TURN_OFF) : T(TURN_ON)) + "</button></noscript></form>";
 }
 
 String saveAlert(const RuleList &l) {
+  if (l.truncated()) return String("<div class=alert>") + T(LIST_TRUNCATED) + "</div>";
   return l.lastSaveOk() ? String() : String("<div class=alert>") + T(SAVE_FAILED) + "</div>";
+}
+
+// Rule list table (declared in web.h)
+void ruleTable(String &p, const RuleList &l, const char *page, const char *delAction) {
+  const size_t PER = 20;
+  String q = server.arg("q");
+  q.toLowerCase();
+  p += "<form method=GET action='" + String(page) + "#list' class=row>"
+       "<input name=q value='" + esc(q) + "' placeholder='" + T(LIST_SEARCH) + "'><button class=g>" +
+       T(LIST_FIND) + "</button></form>";
+
+  size_t matched;
+  size_t pg = server.arg("p").toInt();
+  auto rules = l.page(q, pg * PER, PER, matched);
+  size_t pages = matched ? (matched + PER - 1) / PER : 1;
+  if (pg >= pages) {                     // page number out of range (the list shrank)
+    pg = pages - 1;
+    rules = l.page(q, pg * PER, PER, matched);
+  }
+
+  String pager;                          // shown above and below the table
+  if (pages > 1) {
+    String base = String(page) + "?q=" + urlEncode(q) + "&p=";
+    pager = "<div class=row>";
+    if (pg > 0) pager += "<a class='btn g s' href='" + base + String(pg - 1) + "#list'>" + T(LIST_PREV) + "</a>";
+    char info[96];
+    snprintf(info, sizeof(info), T(LIST_PAGE_FMT), (unsigned)(pg + 1), (unsigned)pages, (unsigned)matched);
+    pager += String("<span class=hint>") + info + "</span>";
+    if (pg + 1 < pages) pager += "<a class='btn g s' href='" + base + String(pg + 1) + "#list'>" + T(LIST_NEXT) + "</a>";
+    pager += "</div>";
+  }
+
+  p += pager + "<div class=tw><table>";
+  for (const std::string *r : rules) {
+    String rule(r->c_str());
+    // Icon-only ghost button (✕): the word goes into title / aria-label
+    p += "<tr><td>" + esc(rule) + "</td><td class=a><form class=i method=POST action='" + delAction +
+         "'><input type=hidden name=domain value='" + esc(rule) + "'><button class='gh s' title='" + T(DELETE) +
+         "' aria-label='" + T(DELETE) + "'>&#10005;</button></form></td></tr>";
+    flushPage(p, 1000);
+  }
+  if (rules.empty()) p += String("<tr><td class=mut>") + (q.length() ? T(LIST_NOTHING_FOUND) : T(LIST_EMPTY)) + "</td></tr>";
+  p += "</table></div>" + pager;
 }
 
 // ================================================================ shared actions
 void ruleAdd(RuleList &l, const char *page) {
   int n = l.add(server.arg("domains"));
+  if (l.limitHit()) return redirectBack(page, T(RULES_ADDED) + String(n) + T(RULES_LIMIT));
   redirectBack(page, n ? T(RULES_ADDED) + String(n) : String(T(RULES_NONE_ADDED)));
 }
 
@@ -305,7 +347,8 @@ void begin() {
   registerGuardPage();
   registerConfigPage();
   route("/lang", HTTP_POST, handleLang);
-  server.on("/style.css", HTTP_GET, handleCss);   // styles: no password needed, nothing secret
+  server.on("/style.css", HTTP_GET, handleCss);   // styles and script: no password needed, nothing secret
+  server.on("/app.js",    HTTP_GET, handleJs);
   server.onNotFound([]() { server.send(404, "text/plain", "404"); });
   server.begin();
   Serial.printf("[WEB] http://%s\n", Config::AP_IP.toString().c_str());

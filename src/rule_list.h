@@ -18,12 +18,19 @@
 
 class RuleList {
 public:
+  // Rules live in internal RAM (~80 bytes each). Hard cap per list, and inserting also stops while
+  // free internal heap is below MIN_FREE_HEAP — so a huge paste or file cannot starve Wi-Fi/lwIP
+  // (and load() cannot crash on every boot).
+  static constexpr size_t   MAX_RULES     = 5000;
+  static constexpr uint32_t MIN_FREE_HEAP = 40 * 1024;
+
   RuleList(const char *file, const char *const *defaults, size_t defaultCount)
     : _file(file), _defaults(defaults), _defaultCount(defaultCount) {}
 
   bool load();                                    // from the file; no file -> the default list
   void resetToDefaults();                         // restore the default list and save it
   int  add(const String &text);                   // many rules (hosts format too); returns how many were added
+  bool limitHit() const { return _full; }         // the last add()/load() stopped at the limit
   bool remove(const String &rule);
   const std::string *match(const char *name, size_t len) const;   // matching rule or nullptr
   // A page for display: rules containing q (empty = all), alphabetical,
@@ -32,6 +39,7 @@ public:
   std::vector<const std::string *> page(const String &q, size_t offset, size_t limit, size_t &matched) const;
   size_t size() const { return _set.size(); }
   bool   lastSaveOk() const { return _saveOk; }
+  bool   truncated() const { return _truncated; }  // load() hit the limit: saving is refused
 
 private:
   static String normalize(String d);              // string -> rule; "" if invalid
@@ -43,6 +51,8 @@ private:
   const char *const *_defaults;
   size_t             _defaultCount;
   bool               _saveOk = true;
+  bool               _full = false;
+  bool               _truncated = false;          // the file holds more than was loaded
   // unordered_set never moves its elements, so pointers to them stay valid
   std::unordered_set<std::string>  _set;
   std::vector<const std::string *> _wild;         // raw *suffix rules only

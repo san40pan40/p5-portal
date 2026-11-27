@@ -38,6 +38,10 @@ const std::string *RuleList::match(const char *name, size_t len) const {
 
 // ================================================================ changes
 bool RuleList::insert(const std::string &rule) {
+  if (_set.size() >= MAX_RULES || ESP.getFreeHeap() < MIN_FREE_HEAP) {
+    _full = true;
+    return false;
+  }
   auto res = _set.insert(rule);
   if (res.second && isRawWild(*res.first)) _wild.push_back(&*res.first);
   return res.second;
@@ -77,7 +81,8 @@ String RuleList::normalize(String d) {
 // or hosts-file format "0.0.0.0 domain1 domain2" (a leading IP is skipped). # starts a comment.
 int RuleList::add(const String &text) {
   int added = 0, start = 0;
-  while (start <= (int)text.length()) {
+  _full = false;
+  while (start <= (int)text.length() && !_full) {
     int nl = text.indexOf('\n', start);
     if (nl < 0) nl = text.length();
     String line = text.substring(start, nl);
@@ -90,7 +95,7 @@ int RuleList::add(const String &text) {
 
     bool first = true;
     int p = 0;
-    while (p < (int)line.length()) {
+    while (p < (int)line.length() && !_full) {
       int sp = line.indexOf(' ', p);
       if (sp < 0) sp = line.length();
       String tok = line.substring(p, sp);
@@ -116,6 +121,8 @@ bool RuleList::remove(const String &rule) {
 void RuleList::resetToDefaults() {
   _wild.clear();
   _set.clear();
+  _full = false;
+  _truncated = false;                            // an explicit reset may replace the file
   for (size_t i = 0; i < _defaultCount; i++) insert(_defaults[i]);
   save();
 }
@@ -139,6 +146,7 @@ std::vector<const std::string *> RuleList::page(const String &q, size_t offset, 
 // Atomic save: write a temp file and replace the real one only if it was written COMPLETELY.
 // A partial write (full flash, failure) leaves the old list untouched.
 bool RuleList::save() {
+  if (_truncated) return false;                  // would cut the file down to what fit in RAM
   String tmp = String(_file) + ".tmp";
   File f = LittleFS.open(tmp, "w");
   if (!f) return _saveOk = false;
@@ -161,6 +169,8 @@ bool RuleList::save() {
 bool RuleList::load() {
   _wild.clear();
   _set.clear();
+  _full = false;
+  _truncated = false;
   // If power was lost between remove and rename, only the temp file exists
   String tmp = String(_file) + ".tmp";
   String path = LittleFS.exists(_file) ? String(_file) : LittleFS.exists(tmp) ? tmp : String();
@@ -180,7 +190,9 @@ bool RuleList::load() {
     if (!line.empty()) insert(line);
     line.clear();
   };
-  while (size_t n = f.read((uint8_t *)buf, sizeof(buf))) {
+  while (!_full) {                               // at the limit: keep what fits, skip the rest
+    size_t n = f.read((uint8_t *)buf, sizeof(buf));
+    if (!n) break;
     for (size_t i = 0; i < n; i++) {
       if (buf[i] == '\n') flushLine();
       else line += buf[i];
@@ -188,5 +200,7 @@ bool RuleList::load() {
   }
   flushLine();                                   // last line without \n
   f.close();
+  _truncated = _full;
+  if (_full) Serial.printf("[RULES] %s: limit reached, loaded %u rules, saving disabled\n", _file, (unsigned)_set.size());
   return true;
 }

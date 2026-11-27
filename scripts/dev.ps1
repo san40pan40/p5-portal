@@ -42,10 +42,21 @@ function Invoke-Ota {
 
 function Invoke-Check {
   $bad = 0
-  foreach ($p in '/', '/dns', '/bypass', '/config', '/style.css') {
+  foreach ($p in '/', '/dns', '/bypass', '/config', '/style.css', '/app.js') {
     $code = & curl.exe -s -o NUL -w '%{http_code}' -m 5 @auth "http://$Ip$p"
     if ($code -ne '200') { Write-Output "FAIL $p -> $code"; $bad++ }
   }
+  # Live values API: valid JSON with the uptime key
+  try { $j = (& curl.exe -s -m 5 @auth "http://$Ip/api/status" | Out-String) | ConvertFrom-Json } catch { $j = $null }
+  if (-not $j -or -not $j.up) { Write-Output 'FAIL /api/status: no JSON'; $bad++ }
+  # Chart history API: both sets are valid JSON with the interval key
+  foreach ($set in 'sys', 'dns') {
+    try { $h = (& curl.exe -s -m 5 @auth "http://$Ip/api/hist?set=$set" | Out-String) | ConvertFrom-Json } catch { $h = $null }
+    if (-not $h -or -not $h.iv) { Write-Output "FAIL /api/hist?set=${set}: no JSON"; $bad++ }
+  }
+  # Static files are stored and sent gzipped
+  $hd = & curl.exe -s -o NUL -D - -m 5 -H 'Accept-Encoding: gzip' "http://$Ip/style.css" | Out-String
+  if ($hd -notmatch 'Content-Encoding: gzip') { Write-Output 'FAIL /style.css: not gzip'; $bad++ }
   # cmd /c: nslookup writes "Non-authoritative answer" to stderr, which PowerShell 5.1 treats as an error
   $ns = cmd /c "nslookup doubleclick.net $Ip 2>nul" | Out-String
   if ($ns -notmatch '0\.0\.0\.0') {
@@ -60,7 +71,7 @@ function Invoke-Check {
   $ok = cmd /c "nslookup example.com $Ip 2>nul" | Out-String
   $n = ([regex]::Matches($ok, '\b\d+\.\d+\.\d+\.\d+\b')).Count
   if ($n -lt 2 -or $ok -match '0\.0\.0\.0') { Write-Output 'FAIL DNS: example.com not resolved'; $bad++ }
-  if ($bad) { exit 1 } else { Write-Output 'CHECK OK (5 pages 200, DNS blocks + resolves)' }
+  if ($bad) { exit 1 } else { Write-Output 'CHECK OK (6 pages 200, api + hist JSON, gzip css, DNS blocks + resolves)' }
 }
 
 switch ($Cmd) {

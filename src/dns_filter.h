@@ -55,6 +55,7 @@ public:
   // ---- Statistics and log ----
   // statFailed: upstream did not answer, was unreachable, or the query was evicted from a full queue
   uint32_t statTotal = 0, statBlocked = 0, statForwarded = 0, statFailed = 0;
+  uint32_t statUpMs = 0, statUpN = 0;            // sum / count of upstream answer times (for the average)
   int  logCount() const { return _log.count(); }
   const DnsLogEntry &logAt(int i) const { return _log.at(i); }   // 0 = newest
 

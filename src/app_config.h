@@ -25,11 +25,18 @@ struct StaticIp {
   IPAddress ip, mask, gw;
 };
 
+// One known uplink network (home Wi-Fi) with its own optional static address
+struct KnownNet {
+  String   ssid, pass;
+  StaticIp st;
+};
+constexpr uint8_t MAX_NETS = 5;
+
 struct Settings {
   String   apSsid, apPass;    // our access point
-  String   staSsid, staPass;  // home Wi-Fi (uplink); empty SSID = do not connect
+  KnownNet nets[MAX_NETS];    // uplink networks; netCount == 0 = do not connect
+  uint8_t  netCount = 0;
   String   webPass;           // web panel password (login "admin"); empty = no password
-  StaticIp st;
   I18n::Lang lang = I18n::Lang::UK;   // web panel language
 };
 
@@ -46,5 +53,6 @@ bool inApSubnet(IPAddress ip);
 bool validApConfig(const String &ssid, const String &pass);
 // Parses the strings into out. Returns an error message, or "" if the address is usable.
 String checkStatic(const String &ip, const String &mask, const String &gw, StaticIp &out);
+String checkStatic(const StaticIp &st);   // same checks on already parsed addresses
 
 }  // namespace Config

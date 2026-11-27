@@ -1,4 +1,5 @@
-// Settings page (/config): language, access point, home Wi-Fi, static IP, panel password, OTA update
+// Settings page (/config): known uplink networks (+ nearby scan), access point, panel password,
+// system (firmware, OTA update, reboot). Each card is its own form; only the AP form restarts.
 #include "web.h"
 #include <WiFi.h>
 #include <Update.h>        // OTA: writes the new firmware into the second app partition
@@ -11,92 +12,239 @@ using Config::settings;
 namespace Web {
 
 static String card(I18n::Str title) { return String("<section class=card><h3>") + I18n::t(title) + "</h3>"; }
-static String label(I18n::Str text) { return String("<label>") + I18n::t(text) + "</label>"; }
+// Field: label text above its control (style.css .f)
+static String field(I18n::Str text, const String &control) {
+  return String("<label class=f><span>") + I18n::t(text) + "</span>" + control + "</label>";
+}
+static String checkbox(const char *name, bool on, const char *text) {
+  return String("<label class=cb><input type=checkbox name=") + name + " value=1" + (on ? " checked" : "") + ">" + text + "</label>";
+}
 
-// Passwords are never put into the page: an empty field means "keep the current one"
-static void handleConfig() {
+// Password inputs never carry the current value: empty means "keep" (app.js adds a show/hide button)
+static String passInput(const char *name, const char *extra) {
+  return String("<input name=") + name + " type=password maxlength=63 autocomplete=new-password placeholder='" +
+         T(CF_PASS_PH) + "'" + extra + ">";
+}
+
+static const char IP_ATTR[] = " inputmode=decimal pattern='((25[0-5]|2[0-4]\\d|1?\\d?\\d)\\.){3}(25[0-5]|2[0-4]\\d|1?\\d?\\d)'";
+
+static bool inRange(const String &ssid) {
+  uint8_t n;
+  const Net::Seen *s = Net::seen(n);
+  for (uint8_t k = 0; k < n; k++)
+    if (ssid == s[k].ssid) return true;
+  return false;
+}
+
+static int8_t knownIndex(const String &ssid) {
+  for (uint8_t i = 0; i < settings.netCount; i++)
+    if (settings.nets[i].ssid == ssid) return i;
+  return -1;
+}
+
+// Known networks table + add/edit form (?net=i edits, ?add=SSID pre-fills a new one) + nearby scan
+static void netsCard(String &b) {
   const Config::Settings &s = settings;
-  bool sta = Net::staConnected();
+  const int8_t act = Net::activeNet();
+  b += card(I18n::CF_NETS_CARD) + "<div class=tw><table>";
+  if (!s.netCount) b += String("<tr><td class=mut>") + T(CF_NETS_NONE) + "</td></tr>";
+  // One row per network: name + state tags, address below it, actions on the right
+  for (uint8_t i = 0; i < s.netCount; i++) {
+    const Config::KnownNet &n = s.nets[i];
+    b += "<tr><td><b>" + esc(n.ssid) + "</b> ";
+    if (i == act && Net::staConnected()) b += tag(T(CF_NET_CONNECTED), "ok") + " ";
+    if (inRange(n.ssid)) b += tag(T(CF_NET_IN_RANGE));
+    b += "<br><small class=mut>" + (n.st.on ? n.st.ip.toString() : String(T(CF_NET_DHCP))) + "</small></td>"
+         "<td class=a><a class='btn gh s' href='/config?net=" + String(i) + "#nf'>" +
+         T(CF_NET_EDIT) + "</a> <form class=i method=POST action='/net/del' data-confirm='" + esc(T(CF_NET_DEL_CONFIRM)) +
+         "'><input type=hidden name=i value=" + String(i) + "><input type=hidden name=os value='" + esc(n.ssid) +
+         "'><button class='gh s bad'>" + T(CF_NET_DELETE) + "</button></form></td></tr>";
+    flushPage(b, 1000);
+  }
+  b += "</table></div>";
+  flushPage(b);
 
-  // Language: its own small form, applied at once without a restart
-  bool en = I18n::lang() == I18n::Lang::EN;
-  String b = card(I18n::CF_LANG_CARD) + "<form method=POST action='/lang' class=row>"
-             "<input type=hidden name=back value='/config'>"
-             "<button class='" + String(en ? "g s" : "s") + "' name=l value=uk>Українська</button>"
-             "<button class='" + String(en ? "s" : "g s") + "' name=l value=en>English</button></form></section>";
+  // Nearby networks: the scan runs in the background, the page refreshes itself until it is done
+  b += String("<div class=actions>") + postBtn("/net/scan", T(CF_SCAN_BTN), "g") + "</div>";
+  if (server.hasArg("scan")) {
+    b += String("<h3 id=scan class=sub>") + T(CF_SCAN_CARD) + "</h3>";
+    if (Net::scanning()) {
+      b += String("<p class=hint>") + T(CF_SCANNING) + "</p>";
+    } else {
+      uint8_t cnt, shown = 0;
+      const Net::Seen *seen = Net::seen(cnt);
+      b += "<div class=tw><table>";
+      for (uint8_t k = 0; k < cnt; k++) {
+        const Net::Seen &a = seen[k];
+        if (!a.ssid[0]) continue;
+        bool dup = false;                          // one row per SSID (the strongest BSSID comes first)
+        for (uint8_t j = 0; j < k && !dup; j++) dup = !strcmp(seen[j].ssid, a.ssid);
+        if (dup) continue;
+        shown++;
+        b += "<tr><td>" + esc(a.ssid) + "</td><td class='" + rssiClass(a.rssi) + "'>" + String(a.rssi) + " dBm</td><td>" +
+             (a.open ? T(CF_SCAN_OPEN) : "&#128274;") + "</td><td class=a>" +
+             (knownIndex(a.ssid) >= 0 ? tag(T(CF_NET_KNOWN))
+                                      : String("<a class='btn gh s' href='/config?add=") + urlEncode(a.ssid) + "#nf'>" + T(CF_SCAN_ADD) + "</a>") +
+             "</td></tr>";
+        flushPage(b, 1000);
+      }
+      if (!shown) b += String("<tr><td class=mut>") + T(LIST_NOTHING_FOUND) + "</td></tr>";
+      b += "</table></div>";
+    }
+  }
+  flushPage(b);
 
-  b += "<form method=POST action='/save'><div class=grid>";
-  b += card(I18n::CF_AP_CARD) + label(I18n::CF_AP_SSID) +
-       "<input name=ap_ssid maxlength=32 required value='" + esc(s.apSsid) + "'>" + label(I18n::CF_AP_PASS) +
-       "<input name=ap_pass type=password minlength=8 maxlength=63 autocomplete=new-password></section>";
-  b += card(I18n::CF_STA_CARD) + label(I18n::CF_STA_SSID) +
-       "<input name=sta_ssid maxlength=32 value='" + esc(s.staSsid) + "'>" + label(I18n::CF_STA_PASS) +
-       "<input name=sta_pass type=password maxlength=63 autocomplete=new-password><p class=hint>" + T(CF_NOW) +
-       (s.staSsid.length() ? (sta ? T(ST_CONNECTED) : T(ST_NOT_CONNECTED)) : T(ST_NOT_CONFIGURED)) + "</p></section>";
-
-  // Empty static-IP fields are pre-filled with what the router gave us — only the IP needs changing
+  // Add / edit form
+  int ei = server.hasArg("net") ? server.arg("net").toInt() : -1;
+  if (ei >= s.netCount) ei = -1;
+  static const Config::KnownNet EMPTY;
+  const Config::KnownNet &n = ei >= 0 ? s.nets[ei] : EMPTY;
+  String ssid = ei >= 0 ? n.ssid : server.arg("add");
+  // Static IP fields: the stored values, else (the active network) what the router gave us
+  const bool live = ei >= 0 && ei == act && Net::staConnected();
   auto val = [](IPAddress a, IPAddress fallback) {
     return (uint32_t)a ? a.toString() : (uint32_t)fallback ? fallback.toString() : String();
   };
   IPAddress none;
-  b += card(I18n::CF_STATIC_CARD) + "<label><input type=checkbox name=st_on value=1" + String(s.st.on ? " checked" : "") +
-       ">" + T(CF_STATIC_ON) + "</label>" +
-       label(I18n::CF_BOARD_IP) + "<input name=st_ip placeholder='192.168.1.53' value='" + val(s.st.ip, sta ? WiFi.localIP() : none) + "'>" +
-       label(I18n::CF_MASK) + "<input name=st_mask value='" + val(s.st.mask, IPAddress(255, 255, 255, 0)) + "'>" +
-       label(I18n::CF_GW) + "<input name=st_gw placeholder='192.168.1.1' value='" + val(s.st.gw, sta ? WiFi.gatewayIP() : none) + "'>" +
+  b += String("<form id=nf method=POST action='/net/save'><h3 class=sub>") +
+       (ei >= 0 ? T(CF_NET_FORM) : T(CF_NET_ADD)) + "</h3><input type=hidden name=i value='" + (ei >= 0 ? String(ei) : String()) +
+       "'><input type=hidden name=os value='" + (ei >= 0 ? esc(n.ssid) : String()) + "'>" + field(I18n::CF_NET_SSID, "<input name=ssid required maxlength=32 value='" + esc(ssid) + "'>") +
+       field(I18n::CF_NET_PASS, passInput("pass", " minlength=8")) +
+       (ei >= 0 ? String("<p class=hint>") + T(CF_NET_PASS_KEEP) + "</p>" : String()) +
+       "<details" + (n.st.on ? " open" : "") + "><summary>" + T(CF_STATIC_ADV) + "</summary>" +
+       checkbox("st_on", n.st.on, T(CF_STATIC_ON)) +
+       field(I18n::CF_BOARD_IP, String("<input name=st_ip") + IP_ATTR + " placeholder='192.168.1.53' value='" +
+                                    val(n.st.ip, live ? WiFi.localIP() : none) + "'>") +
+       field(I18n::CF_MASK, String("<input name=st_mask") + IP_ATTR + " value='" + val(n.st.mask, IPAddress(255, 255, 255, 0)) + "'>") +
+       field(I18n::CF_GW, String("<input name=st_gw") + IP_ATTR + " placeholder='192.168.1.1' value='" +
+                              val(n.st.gw, live ? WiFi.gatewayIP() : none) + "'>") +
        "<p class=hint>" + T(CF_STATIC_HINT1) + "<code>" + WiFi.macAddress() + "</code>" + T(CF_STATIC_HINT2) + "</p>" +
-       "<p class=hint>" + T(CF_SECONDARY_HINT) + "</p></section>";
-  b += card(I18n::CF_WEB_CARD) + "<p class=hint>" + T(CF_LOGIN) + "<code>admin</code>" + T(CF_PASS_NOW) +
-       (s.webPass.length() ? tag(T(CF_SET), "ok") : tag(T(CF_NOT_SET), "warn")) + "</p>" + label(I18n::CF_WEB_PASS) +
-       "<input name=web_pass type=password maxlength=63 autocomplete=new-password>"
-       "<label><input type=checkbox name=web_clear value=1>" + T(CF_WEB_CLEAR) + "</label></section>";
-  b += card(I18n::CF_FORGOT_CARD) + "<p class=hint>" + T(CF_FORGOT_1) + "<code>" + Config::DEFAULT_AP_SSID + "</code> / <code>" +
-       Config::DEFAULT_AP_PASS + "</code>" + T(CF_FORGOT_2) + "</p><p class=hint>" + T(CF_FORGOT_3) + "</p></section>";
-  b += String("</div><div class=card><button>") + T(CF_SAVE_BTN) + "</button> <span class=hint>" + T(CF_SAVE_HINT) +
-       "</span></div></form>";
+       "<p class=hint>" + T(CF_SECONDARY_HINT) + "</p></details><div class=actions><button>" + T(SAVE) + "</button>";
+  if (ei >= 0 || ssid.length()) b += String("<a class='btn g' href='/config'>") + T(CANCEL) + "</a>";
+  b += "</div></form>";
+  flushPage(b);
 
-  // OTA — a separate form (file upload), not inside the settings form
-  b += card(I18n::CF_OTA_CARD) + "<p class=hint>" + T(CF_OTA_BUILD) + __DATE__ + " " + __TIME__ + T(CF_OTA_FREE) +
+  b += "</section>";
+}
+
+static void handleConfig() {
+  const Config::Settings &s = settings;
+  // While a scan runs the page reloads itself until the results are in
+  const bool scanning = server.hasArg("scan") && Net::scanning();
+  beginPage(T(MENU_SETTINGS), "/config", 200, scanning ? "<meta http-equiv=refresh content='3;url=/config?scan=1#scan'>" : "");
+  String b;
+  b.reserve(1200);                               // one buffer, reused for every card
+  netsCard(b);
+  flushPage(b);
+
+  b += card(I18n::CF_AP_CARD) + "<form method=POST action='/save/ap'>" +
+       field(I18n::CF_AP_SSID, "<input name=ap_ssid minlength=1 maxlength=32 required value='" + esc(s.apSsid) + "'>") +
+       field(I18n::CF_AP_PASS, passInput("ap_pass", " minlength=8")) + "<p class=hint>" + T(CF_SAVE_HINT) +
+       "</p><div class=actions><button>" + T(CF_SAVE_BTN) + "</button></div></form></section>";
+  flushPage(b);
+  b += card(I18n::CF_WEB_CARD) + "<form method=POST action='/save/web'><p class=hint>" + T(CF_LOGIN) + "<code>admin</code>" +
+       T(CF_PASS_NOW) + (s.webPass.length() ? tag(T(CF_SET), "ok") : tag(T(CF_NOT_SET), "warn")) + "</p>" +
+       field(I18n::CF_WEB_PASS, passInput("web_pass", "")) + checkbox("web_clear", false, T(CF_WEB_CLEAR)) +
+       "<div class=actions><button>" + T(SAVE) + "</button></div></form></section>";
+  flushPage(b);
+
+  // System: firmware info, OTA (file upload form), reboot, password recovery
+  b += card(I18n::CF_SYS_CARD) + "<p class=hint>" + T(CF_OTA_BUILD) + __DATE__ + " " + __TIME__ + T(CF_OTA_FREE) +
        String(ESP.getFreeSketchSpace() / 1024) + T(ST_KB) + ".</p>"
        "<form method=POST action='/update' enctype='multipart/form-data' "
        "onsubmit=\"this.querySelector('button').disabled=true;this.querySelector('span').textContent='" +
-       T(CF_OTA_UPLOADING) + "'\"><input type=file name=fw accept='.bin' required><div class=row><button>" +
-       T(CF_OTA_BTN) + "</button><span class=hint></span></div></form><p class=hint>" + T(CF_OTA_HINT) + "</p></section>";
-  sendPage(T(MENU_SETTINGS), "/config", b);
+       T(CF_OTA_UPLOADING) + "'\"><div class=row><input type=file name=fw accept='.bin' required><button>" +
+       T(CF_OTA_BTN) + "</button><span class=hint></span></div></form><p class=hint>" + T(CF_OTA_HINT) + "</p>" +
+       "<div class=actions>" + postBtn("/reboot", T(ST_REBOOT), "r", nullptr, "", T(ST_REBOOT_CONFIRM)) + "</div>" +
+       "<details><summary>" + T(CF_FORGOT_CARD) + "</summary><p class=hint>" + T(CF_FORGOT_1) + "<code>" +
+       Config::DEFAULT_AP_SSID + "</code> / <code>" + Config::DEFAULT_AP_PASS + "</code>" + T(CF_FORGOT_2) +
+       "</p><p class=hint>" + T(CF_FORGOT_3) + "</p></details></section>";
+  endPage(b);
 }
 
-// Validate everything BEFORE saving, so we never store settings the AP cannot start with
-static void handleSave() {
+// ---------------------------------------------------------------- known networks
+static void handleNetSave() {
   Config::Settings &s = settings;
-  String newApSsid  = server.arg("ap_ssid");
-  String newApPass  = server.arg("ap_pass");
-  String newStaSsid = server.arg("sta_ssid");
-  String newStaPass = server.arg("sta_pass");
-  String newWebPass = server.arg("web_pass");
-  newApSsid.trim();
-  newStaSsid.trim();
+  String ssid = server.arg("ssid"), pass = server.arg("pass"), si = server.arg("i");
+  // The SSID is used as typed (spaces are valid in a network name); only blank is rejected
+  String blank = ssid;
+  blank.trim();
+  if (!blank.length() || ssid.length() > 32 || pass.length() > 63 || (pass.length() && pass.length() < 8))
+    return sendError(T(CF_ERR_STA), "/config");
 
-  if (!Config::validApConfig(newApSsid, newApPass.length() ? newApPass : s.apPass)) return sendError(T(CF_ERR_AP), "/config");
-  if (newStaSsid.length() > 32 || newStaPass.length() > 63) return sendError(T(CF_ERR_STA), "/config");
+  // Editing: the index must still point at the network the page showed (the list may have changed)
+  int i = si.length() ? si.toInt() : -1;
+  if (si.length() && (i < 0 || i >= s.netCount || s.nets[i].ssid != server.arg("os")))
+    return sendError(T(CF_NET_STALE), "/config");
+  const int dup = knownIndex(ssid);
+  if (i < 0) i = dup;                              // a known SSID added again: update it in place
+  else if (dup >= 0 && dup != i) return sendError(String(T(CF_NET_KNOWN)) + ": " + ssid, "/config");
+  if (i < 0 && s.netCount >= Config::MAX_NETS) return sendError(T(CF_NETS_FULL), "/config");
 
-  // Static IP: parse into a temporary and apply only if valid
-  Config::StaticIp newSt;
-  newSt.on = server.hasArg("st_on");
+  // Static IP: parse into a temporary; switched on only if valid
+  Config::StaticIp st;
+  st.on = server.hasArg("st_on");
   String sIp = server.arg("st_ip"), sMask = server.arg("st_mask"), sGw = server.arg("st_gw");
   sIp.trim(); sMask.trim(); sGw.trim();
-  String err = Config::checkStatic(sIp, sMask, sGw, newSt);
-  if (newSt.on && err.length()) return sendError(err, "/config");
-  s.st = newSt;
+  String err = Config::checkStatic(sIp, sMask, sGw, st);
+  if (st.on && err.length()) return sendError(err, "/config");
 
-  s.apSsid = newApSsid;
-  if (newApPass.length()) s.apPass = newApPass;
-  if (newStaSsid != s.staSsid) s.staPass = "";     // different router — the old password is useless
-  s.staSsid = newStaSsid;
-  if (newStaPass.length()) s.staPass = newStaPass;
-  if (server.hasArg("web_clear")) s.webPass = "";
-  else if (newWebPass.length()) s.webPass = newWebPass;
+  const bool force = i >= 0 && i == Net::activeNet();   // the uplink in use was edited: reconnect
+  if (i < 0) {
+    i = s.netCount++;
+    s.nets[i] = Config::KnownNet();
+  }
+  Config::KnownNet &n = s.nets[i];
+  if (pass.length() || n.ssid != ssid) n.pass = pass;   // empty keeps the password only for the same SSID
+  n.ssid = ssid;
+  n.st = st;
   Config::save();
-  sendRestartPage(T(CF_SAVED));
+  Net::reselect(force);
+  redirectMsg("/config", T(CF_NET_SAVED) + ssid);
+}
+
+static void handleNetDel() {
+  Config::Settings &s = settings;
+  String si = server.arg("i");
+  int i = si.toInt();
+  // The index must still point at the network the page showed (the list may have changed)
+  if (!si.length() || i < 0 || i >= s.netCount || s.nets[i].ssid != server.arg("os"))
+    return sendError(T(CF_NET_STALE), "/config");
+  String name = s.nets[i].ssid;
+  for (uint8_t j = i; j + 1 < s.netCount; j++) s.nets[j] = s.nets[j + 1];
+  s.nets[--s.netCount] = Config::KnownNet();
+  Config::save();
+  Net::reselect();
+  redirectMsg("/config", T(CF_NET_DELETED) + name);
+}
+
+static void handleNetScan() {
+  Net::startScan();
+  server.sendHeader("Location", "/config?scan=1#scan", true);
+  server.send(303, "text/plain", "");
+}
+
+// ---------------------------------------------------------------- AP and panel password
+// Validate BEFORE saving, so we never store settings the AP cannot start with
+static void handleSaveAp() {
+  Config::Settings &s = settings;
+  String ssid = server.arg("ap_ssid"), pass = server.arg("ap_pass");
+  ssid.trim();
+  if (!Config::validApConfig(ssid, pass.length() ? pass : s.apPass)) return sendError(T(CF_ERR_AP), "/config");
+  const bool changed = ssid != s.apSsid || pass.length();
+  s.apSsid = ssid;
+  if (pass.length()) s.apPass = pass;
+  Config::save();
+  sendRestartPage(T(CF_SAVED), changed ? ssid : String());
+}
+
+static void handleSaveWeb() {
+  Config::Settings &s = settings;
+  String pass = server.arg("web_pass");
+  if (server.hasArg("web_clear")) s.webPass = "";
+  else if (pass.length()) s.webPass = pass;
+  Config::save();
+  redirectMsg("/config", T(CF_SAVED));
 }
 
 // ---------------------------------------------------------------- OTA
@@ -138,8 +286,12 @@ static void handleUpdateDone() {                  // via routeUpload(): access a
 }
 
 void registerConfigPage() {
-  route("/config", HTTP_ANY,  handleConfig);
-  route("/save",   HTTP_POST, handleSave);
+  route("/config",   HTTP_ANY,  handleConfig);
+  route("/net/save", HTTP_POST, handleNetSave);
+  route("/net/del",  HTTP_POST, handleNetDel);
+  route("/net/scan", HTTP_POST, handleNetScan);
+  route("/save/ap",  HTTP_POST, handleSaveAp);
+  route("/save/web", HTTP_POST, handleSaveWeb);
   routeUpload("/update", handleUpdateDone, handleUpdateUpload);
 }
 
