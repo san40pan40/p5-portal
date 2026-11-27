@@ -4,15 +4,7 @@
 name: blocklists
 
 on:
-  schedule:
-    - cron: "17 3 * * *"   # daily 03:17 UTC
-  workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "blocklists/**"
-      - "scripts/build_lists.py"
-      - ".github/workflows/blocklists.yml"
+  workflow_dispatch:   # manual only for now: Actions -> blocklists -> Run workflow
 
 permissions:
   contents: write
