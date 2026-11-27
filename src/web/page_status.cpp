@@ -10,15 +10,24 @@
 
 namespace Web {
 
+static String kb(uint32_t used, uint32_t total) {
+  return String(used / 1024) + T(ST_OF) + String(total / 1024) + T(ST_KB);
+}
+
 // LittleFS computes its usage by walking every block — cache it for a minute
 static String fsUsage() {
   static uint32_t at = 0;
-  static String s;
-  if (!s.length() || millis() - at > 60000) {
+  static size_t used = 0, total = 0;
+  if (!total || millis() - at > 60000) {
     at = millis();
-    s = String(LittleFS.usedBytes() / 1024) + " з " + String(LittleFS.totalBytes() / 1024) + " КБ";
+    used = LittleFS.usedBytes();
+    total = LittleFS.totalBytes();
   }
-  return s;
+  return kb(used, total);
+}
+
+static String onOff(bool on, const char *offCls = "") {
+  return on ? tag(T(ON_LOWER), "ok") : tag(T(OFF_LOWER), offCls);
 }
 
 static void handleRoot() {
@@ -28,56 +37,60 @@ static void handleRoot() {
   bool inet = sta && n.ok;
   int rssi = sta ? WiFi.RSSI() : 0;
   uint32_t tot = dns.statTotal;
+  char buf[96];
 
   String p;
   p.reserve(7000);                               // one allocation instead of many reallocs
 
   // ---- Tiles: the essentials at a glance ----
   p += "<div class=tiles>";
-  p += tile(inet ? "є" : "немає", inet ? "інтернет · " + String(n.ms) + " мс" : String("інтернет"), inet ? "ok" : "bad");
-  if (sta) p += tile(String(rssi) + " dBm", String("сигнал роутера · ") + rssiText(rssi), rssiClass(rssi));
-  else     p += tile("—", "сигнал роутера", "mut");
-  p += tile(String(WiFi.softAPgetStationNum()), "клієнтів на точці");
-  p += tile(String(dns.statBlocked), "заблоковано · " + String(pct(dns.statBlocked, tot)) + "% запитів");
-  p += tile(fmtDur(millis() / 1000), "працює без перезапуску");
+  p += tile(inet ? T(ST_YES) : T(ST_NO),
+            inet ? T(ST_INTERNET) + String(" · ") + String(n.ms) + T(ST_MS) : String(T(ST_INTERNET)),
+            inet ? "ok" : "bad");
+  if (sta) p += tile(String(rssi) + " dBm", T(ST_ROUTER_SIGNAL) + String(" · ") + rssiText(rssi), rssiClass(rssi));
+  else     p += tile("—", T(ST_ROUTER_SIGNAL), "mut");
+  p += tile(String(WiFi.softAPgetStationNum()), T(ST_AP_CLIENTS));
+  snprintf(buf, sizeof(buf), T(ST_BLOCKED_FMT), (unsigned)pct(dns.statBlocked, tot));
+  p += tile(String(dns.statBlocked), buf);
+  p += tile(fmtDur(millis() / 1000), T(ST_UPTIME));
   p += "</div><div class=grid>";
 
   // ---- Uplink (router) ----
-  p += "<section class=card><h3>Роутер (інтернет)</h3><table>";
+  p += String("<section class=card><h3>") + T(ST_ROUTER_CARD) + "</h3><table>";
   if (!cfg.staSsid.length()) {
-    p += row("Статус", tag("не налаштовано"));
-    p += "</table><p class=hint>Вкажіть домашній Wi-Fi у налаштуваннях — через нього клієнти отримають інтернет.</p>";
+    p += row(T(ST_STATUS), tag(T(ST_NOT_CONFIGURED)));
+    p += String("</table><p class=hint>") + T(ST_ROUTER_HINT) + "</p>";
   } else {
-    p += row("Мережа", esc(cfg.staSsid));
+    p += row(T(ST_NETWORK), esc(cfg.staSsid));
     if (!sta) {
-      p += row("Статус", tag("не підключено", "bad") + " <span class=mut>пробуємо знову кожні 30 с</span>");
+      p += row(T(ST_STATUS), tag(T(ST_NOT_CONNECTED), "bad") + " <span class=mut>" + T(ST_RETRY_HINT) + "</span>");
     } else {
-      p += row("Статус", tag("підключено", "ok") + " <span class=mut>" + fmtDur((millis() - Net::staSince()) / 1000) + "</span>");
-      p += row("Сигнал", "<span class=" + String(rssiClass(rssi)) + ">" + String(rssi) + " dBm</span> (" + rssiText(rssi) + ")");
-      p += row("Інтернет", inet ? tag("є", "ok") + " " + String(n.ms) + " мс до " + Net::PROBE.toString()
-                                : tag("немає", "bad"));
-      if (n.at) p += row("Перевірено", fmtDur((millis() - n.at) / 1000) + " тому");
-      p += row("Канал", String(WiFi.channel()));
-      p += row("Мій IP", "<b>" + WiFi.localIP().toString() + "</b> " +
-                             (cfg.st.on ? tag("статична", "ok") : tag("від DHCP")) +
-                             "<br><span class=mut>можна вказати в роутері як DNS-сервер</span>");
-      p += row("Шлюз / DNS роутера", WiFi.gatewayIP().toString() + " / " + WiFi.dnsIP().toString());
+      p += row(T(ST_STATUS), tag(T(ST_CONNECTED), "ok") + " <span class=mut>" + fmtDur((millis() - Net::staSince()) / 1000) + "</span>");
+      p += row(T(ST_SIGNAL), "<span class=" + String(rssiClass(rssi)) + ">" + String(rssi) + " dBm</span> (" + rssiText(rssi) + ")");
+      p += row(T(ST_INTERNET_ROW), inet ? tag(T(ST_YES), "ok") + " " + String(n.ms) + T(ST_MS_TO) + Net::PROBE.toString()
+                                        : tag(T(ST_NO), "bad"));
+      if (n.at) p += row(T(ST_CHECKED), fmtDur((millis() - n.at) / 1000) + T(ST_AGO));
+      p += row(T(ST_CHANNEL), String(WiFi.channel()));
+      p += row(T(ST_MY_IP), "<b>" + WiFi.localIP().toString() + "</b> " +
+                                (cfg.st.on ? tag(T(ST_STATIC), "ok") : tag(T(ST_FROM_DHCP))) +
+                                "<br><span class=mut>" + T(ST_USE_AS_DNS) + "</span>");
+      p += row(T(ST_GW_DNS), WiFi.gatewayIP().toString() + " / " + WiFi.dnsIP().toString());
       p += row("BSSID", WiFi.BSSIDstr());
     }
-    p += row("Розривів зв'язку", String(Net::staDrops()));
+    p += row(T(ST_DROPS), String(Net::staDrops()));
     p += "</table>";
   }
-  p += "<div class=row style='margin-top:.7em'>" + postBtn("/netcheck", "Перевірити інтернет", "s") +
-       "<a class='btn g s' href='/config'>Змінити мережу</a></div></section>";
+  p += "<div class=row style='margin-top:.7em'>" + postBtn("/netcheck", T(ST_CHECK_NOW), "s") +
+       "<a class='btn g s' href='/config'>" + T(ST_CHANGE_NET) + "</a></div></section>";
 
   // ---- Access point and clients ----
-  p += "<section class=card><h3>Точка доступу</h3><table>";
-  p += row("Мережа", "<b>" + esc(WiFi.softAPSSID()) + "</b>");
-  p += row("Адреса панелі", "http://" + WiFi.softAPIP().toString());
-  p += row("Канал", String(WiFi.channel()) + (sta ? " <span class=mut>(як у роутера)</span>" : ""));
-  p += row("NAT", Net::natOn() ? tag("увімкнено", "ok") : tag("вимкнено"));
-  p += row("DNS фільтр", dns.enabled() ? tag("увімкнено", "ok") : tag("вимкнено", "bad"));
-  p += row("Охорона", AntiBypass::enabled() ? tag("увімкнено", "ok") : tag("вимкнено", "bad"));
+  p += String("<section class=card><h3>") + T(ST_AP_CARD) + "</h3><table>";
+  p += row(T(ST_NETWORK), "<b>" + esc(WiFi.softAPSSID()) + "</b>");
+  p += row(T(ST_PANEL_ADDR), "http://" + WiFi.softAPIP().toString());
+  p += row(T(ST_CHANNEL), String(WiFi.channel()) + (sta ? String(" <span class=mut>") + T(ST_SAME_AS_ROUTER) + "</span>" : String()));
+  p += row("NAT", onOff(Net::natOn()));
+  p += row(T(MENU_FILTER), onOff(dns.enabled(), "bad"));
+  p += row(T(MENU_GUARD), onOff(AntiBypass::enabled(), "bad"));
   p += "</table>";
 
   wifi_sta_list_t sl;
@@ -89,7 +102,8 @@ static void handleRoot() {
       pairs[i].ip.addr = 0;
     }
     esp_netif_dhcps_get_clients_by_mac(WiFi.AP.netif(), sl.num, pairs);
-    p += "<h3 style='margin-top:1em'>Клієнти</h3><table><tr><th>IP</th><th>MAC</th><th>сигнал</th></tr>";
+    p += String("<h3 style='margin-top:1em'>") + T(ST_CLIENTS) + "</h3><table><tr><th>IP</th><th>MAC</th><th>" +
+         T(ST_SIGNAL_COL) + "</th></tr>";
     for (int i = 0; i < sl.num; i++) {
       int r = sl.sta[i].rssi;
       p += "<tr><td>" + (pairs[i].ip.addr ? IPAddress(pairs[i].ip.addr).toString() : String("—")) +
@@ -98,31 +112,31 @@ static void handleRoot() {
     }
     p += "</table>";
   } else {
-    p += "<p class=hint>Клієнтів поки немає.</p>";
+    p += String("<p class=hint>") + T(ST_NO_CLIENTS) + "</p>";
   }
   p += "</section>";
 
   // ---- System ----
-  p += "<section class=card><h3>Система</h3><table>";
-  p += row("Вільна RAM", String(ESP.getFreeHeap() / 1024) + " з " + String(ESP.getHeapSize() / 1024) + " КБ");
-  p += row("Вільна PSRAM", String(ESP.getFreePsram() / 1024) + " з " + String(ESP.getPsramSize() / 1024) + " КБ");
-  p += row("Температура чипа", String(temperatureRead(), 1) + " °C");
-  p += row("Флеш (LittleFS)", fsUsage());
-  p += row("MAC точки", WiFi.softAPmacAddress());
-  p += row("Прошивка", String(__DATE__) + " " + __TIME__);
+  p += String("<section class=card><h3>") + T(ST_SYSTEM) + "</h3><table>";
+  p += row(T(ST_FREE_RAM), kb(ESP.getFreeHeap(), ESP.getHeapSize()));
+  p += row(T(ST_FREE_PSRAM), kb(ESP.getFreePsram(), ESP.getPsramSize()));
+  p += row(T(ST_CHIP_TEMP), String(temperatureRead(), 1) + " °C");
+  p += row(T(ST_FLASH), fsUsage());
+  p += row(T(ST_AP_MAC), WiFi.softAPmacAddress());
+  p += row(T(ST_FIRMWARE), String(__DATE__) + " " + __TIME__);
   p += "</table><div class=row style='margin-top:.7em'>" +
-       postBtn("/reboot", "Перезавантажити", "r s", nullptr, "", "Перезавантажити плату?") + "</div></section>";
+       postBtn("/reboot", T(ST_REBOOT), "r s", nullptr, "", T(ST_REBOOT_CONFIRM)) + "</div></section>";
   p += "</div>";
 
-  sendPage("Статус", "/", p, 200, "<meta http-equiv=refresh content=15>");   // auto-refresh every 15 s
+  sendPage(T(MENU_STATUS), "/", p, 200, "<meta http-equiv=refresh content=15>");   // auto-refresh every 15 s
 }
 
 static void handleNetCheck() {
   Net::requestCheck();                           // the check task runs within ~1 s
-  redirectMsg("/", "Перевірку інтернету запущено — результат з'явиться за кілька секунд");
+  redirectMsg("/", T(ST_CHECK_STARTED));
 }
 
-static void handleReboot() { sendRestartPage("Перезавантаження"); }
+static void handleReboot() { sendRestartPage(T(RESTART_TITLE)); }
 
 void registerStatusPage() {
   route("/",         HTTP_ANY,  handleRoot);

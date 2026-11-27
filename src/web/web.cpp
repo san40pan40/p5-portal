@@ -103,8 +103,9 @@ void routeUpload(const char *uri, void (*done)(), void (*upload)()) {
 String pageStart(const char *title, const char *active, const char *extraHead) {
   String h;
   h.reserve(2500);
-  h += "<!DOCTYPE html><html lang=uk><head><meta charset=utf-8>"
-       "<meta name=viewport content='width=device-width,initial-scale=1'>";
+  h += "<!DOCTYPE html><html lang=";
+  h += T(LANG_CODE);
+  h += "><head><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>";
   h += extraHead;
   h += "<title>";
   h += title;
@@ -112,24 +113,34 @@ String pageStart(const char *title, const char *active, const char *extraHead) {
   h += " · P5 Portal</title><link rel=stylesheet href='/style.css?v=" __DATE__ __TIME__ "'></head><body><header><div class=top>";
 
   const char *col, *txt;
-  if (!Config::settings.staSsid.length()) { col = "var(--mut)";  txt = "роутер не налаштовано"; }
-  else if (!Net::staConnected())          { col = "var(--bad)";  txt = "немає роутера"; }
-  else if (!Net::internetOk())            { col = "var(--warn)"; txt = "немає інтернету"; }
-  else                                    { col = "var(--ok)";   txt = "інтернет є"; }
+  if (!Config::settings.staSsid.length()) { col = "var(--mut)";  txt = T(HDR_NO_ROUTER_CFG); }
+  else if (!Net::staConnected())          { col = "var(--bad)";  txt = T(HDR_NO_ROUTER); }
+  else if (!Net::internetOk())            { col = "var(--warn)"; txt = T(HDR_NO_INTERNET); }
+  else                                    { col = "var(--ok)";   txt = T(HDR_ONLINE); }
   h += "<span class=brand><span class=dot style='background:";
   h += col;
   h += "'></span>P5 Portal</span><span class=chip>";
   h += txt;
-  h += "</span><span class=chip>клієнтів: " + String(WiFi.softAPgetStationNum()) + "</span></div><nav>";
+  h += "</span><span class=chip>";
+  h += T(HDR_CLIENTS);
+  h += String(WiFi.softAPgetStationNum()) + "</span>";
+  // Quick language switch: shows the other language, returns to the same page
+  h += "<form class=i method=POST action='/lang'><input type=hidden name=back value='";
+  h += active;
+  h += "'><button class='g s' name=l value='";
+  h += I18n::lang() == I18n::Lang::EN ? "uk" : "en";
+  h += "'>";
+  h += T(LANG_SWITCH);
+  h += "</button></form></div><nav>";
 
-  static const char *const MENU[][2] = {
-    {"/", "Статус"}, {"/dns", "DNS фільтр"}, {"/bypass", "Охорона"}, {"/config", "Налаштування"},
+  static const struct { const char *path; I18n::Str label; } MENU[] = {
+    {"/", I18n::MENU_STATUS}, {"/dns", I18n::MENU_FILTER}, {"/bypass", I18n::MENU_GUARD}, {"/config", I18n::MENU_SETTINGS},
   };
   for (auto &m : MENU) {
     h += "<a href='";
-    h += m[0];
-    h += strcmp(m[0], active) == 0 ? "' class=on>" : "'>";
-    h += m[1];
+    h += m.path;
+    h += strcmp(m.path, active) == 0 ? "' class=on>" : "'>";
+    h += I18n::t(m.label);
     h += "</a>";
   }
   h += "</nav></header><main>";
@@ -150,15 +161,13 @@ void sendPage(const char *title, const char *active, const String &body, int cod
 }
 
 void sendError(const String &msg, const char *back) {
-  sendPage("Помилка", "", "<section class=card><h3>Помилка</h3><p class=bad>" + esc(msg) +
-           "</p><a class=btn href='" + back + "'>&larr; Назад</a></section>", 400);
+  sendPage(T(ERROR_TITLE), "", String("<section class=card><h3>") + T(ERROR_TITLE) + "</h3><p class=bad>" + esc(msg) +
+           "</p><a class=btn href='" + back + "'>" + T(BACK) + "</a></section>", 400);
 }
 
 void sendRestartPage(const char *heading) {
-  sendPage("Перезавантаження", "", String("<section class=card><h3>") + heading +
-           "</h3><p>Плата перезавантажується. Якщо змінювали назву чи пароль точки — "
-           "перепідключіться до неї. Сторінка відкриється сама за 12 секунд.</p></section>",
-           200, "<meta http-equiv=refresh content='12;url=/'>");
+  sendPage(T(RESTART_TITLE), "", String("<section class=card><h3>") + heading + "</h3><p>" + T(RESTART_TEXT) +
+           "</p></section>", 200, "<meta http-equiv=refresh content='12;url=/'>");
   delay(800);
   ESP.restart();
 }
@@ -171,7 +180,7 @@ void redirectMsg(const char *url, const String &msg) {
 
 void redirectBack(const char *def, const String &msg) {
   String b = server.arg("back");
-  redirectMsg(b == "/" || b == "/dns" || b == "/bypass" ? b.c_str() : def, msg);
+  redirectMsg(b == "/" || b == "/dns" || b == "/bypass" || b == "/config" ? b.c_str() : def, msg);
 }
 
 // ================================================================ HTML pieces
@@ -223,26 +232,34 @@ String row(const String &k, const String &v) { return "<tr><td class=k>" + k + "
 
 // "Title [ON] [Turn off]"
 String toggleRow(const char *title, bool on, const char *action) {
-  return String("<div class=row><b>") + title + "</b>" + tag(on ? "УВІМКНЕНО" : "ВИМКНЕНО", on ? "ok" : "bad") +
-         postBtn(action, on ? "Вимкнути" : "Увімкнути", on ? "g s" : "s") + "</div>";
+  return String("<div class=row><b>") + title + "</b>" + tag(on ? T(ON_CAPS) : T(OFF_CAPS), on ? "ok" : "bad") +
+         postBtn(action, on ? T(TURN_OFF) : T(TURN_ON), on ? "g s" : "s") + "</div>";
 }
 
 String saveAlert(const RuleList &l) {
-  return l.lastSaveOk() ? String()
-                        : String("<div class=alert>Не вдалося зберегти список на флеш — "
-                                 "останні зміни діють лише до перезавантаження.</div>");
+  return l.lastSaveOk() ? String() : String("<div class=alert>") + T(SAVE_FAILED) + "</div>";
 }
 
 // ================================================================ shared actions
 void ruleAdd(RuleList &l, const char *page) {
   int n = l.add(server.arg("domains"));
-  redirectBack(page, n ? "Додано правил: " + String(n)
-                       : String("Нічого не додано: такі правила вже є або формат невірний"));
+  redirectBack(page, n ? T(RULES_ADDED) + String(n) : String(T(RULES_NONE_ADDED)));
 }
 
 void ruleDel(RuleList &l, const char *page) {
   String r = server.arg("domain");
-  redirectBack(page, l.remove(r) ? "Видалено: " + r : String("Правило не знайдено"));
+  redirectBack(page, l.remove(r) ? T(RULE_REMOVED) + r : String(T(RULE_NOT_FOUND)));
+}
+
+// Language switch (header button or Settings): takes effect at once, no restart
+static void handleLang() {
+  I18n::Lang l;
+  if (I18n::parseLang(server.arg("l"), l)) {
+    I18n::setLang(l);
+    Config::settings.lang = l;
+    Config::save();
+  }
+  redirectBack("/", T(LANG_CHANGED));
 }
 
 void finishToggle(const char *page, bool on, const char *onMsg, const char *offMsg) {
@@ -253,20 +270,20 @@ void finishToggle(const char *page, bool on, const char *onMsg, const char *offM
 // ================================================================ formatting
 String fmtDur(uint32_t s) {
   uint32_t d = s / 86400, h = s / 3600 % 24, m = s / 60 % 60;
-  if (d) return String(d) + "д " + String(h) + "г " + String(m) + "хв";
-  if (h) return String(h) + "г " + String(m) + "хв";
-  if (m) return String(m) + "хв " + String(s % 60) + "с";
-  return String(s) + "с";
+  if (d) return String(d) + T(DUR_D) + " " + String(h) + T(DUR_H) + " " + String(m) + T(DUR_M);
+  if (h) return String(h) + T(DUR_H) + " " + String(m) + T(DUR_M);
+  if (m) return String(m) + T(DUR_M) + " " + String(s % 60) + T(DUR_S);
+  return String(s) + T(DUR_S);
 }
 
 uint32_t pct(uint32_t part, uint32_t total) { return total ? (uint64_t)part * 100 / total : 0; }
 
 // Wi-Fi signal quality (dBm: closer to 0 is better)
 const char *rssiText(int rssi) {
-  if (rssi >= -55) return "відмінний";
-  if (rssi >= -67) return "добрий";
-  if (rssi >= -75) return "слабкий";
-  return "дуже слабкий";
+  if (rssi >= -55) return T(RSSI_EXCELLENT);
+  if (rssi >= -67) return T(RSSI_GOOD);
+  if (rssi >= -75) return T(RSSI_WEAK);
+  return T(RSSI_POOR);
 }
 
 const char *rssiClass(int rssi) { return rssi >= -67 ? "ok" : rssi >= -75 ? "warn" : "bad"; }
@@ -287,6 +304,7 @@ void begin() {
   registerDnsPage();
   registerGuardPage();
   registerConfigPage();
+  route("/lang", HTTP_POST, handleLang);
   server.on("/style.css", HTTP_GET, handleCss);   // styles: no password needed, nothing secret
   server.onNotFound([]() { server.send(404, "text/plain", "404"); });
   server.begin();

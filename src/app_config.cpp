@@ -31,6 +31,7 @@ static const char *K_DNS_UP     = "dns_up";
 static const char *K_DNS_ON     = "dns_on";
 static const char *K_GUARD_ON   = "guard_on";
 static const char *K_GUARD_DOH  = "guard_doh_ip";
+static const char *K_LANG       = "lang";
 
 static Preferences prefs;
 
@@ -46,16 +47,14 @@ bool validApConfig(const String &ssid, const String &pass) {
 }
 
 String checkStatic(const String &sip, const String &smask, const String &sgw, StaticIp &out) {
-  if (!out.ip.fromString(sip) || !out.mask.fromString(smask) || !out.gw.fromString(sgw))
-    return "Невірний формат IP-адреси, маски чи шлюзу (приклад: 192.168.1.53 / 255.255.255.0 / 192.168.1.1).";
+  if (!out.ip.fromString(sip) || !out.mask.fromString(smask) || !out.gw.fromString(sgw)) return T(CS_FORMAT);
   // The mask must be contiguous: ones on the left, zeros on the right
-  if (!(uint32_t)out.mask || !ip4_addr_netmask_valid((uint32_t)out.mask))
-    return "Невірна маска мережі (зазвичай 255.255.255.0).";
-  if (!sameNet(out.ip, out.gw, out.mask)) return "IP плати і шлюз (роутер) мають бути в одній мережі.";
-  if (out.ip == out.gw) return "IP плати не може збігатися з адресою роутера.";
+  if (!(uint32_t)out.mask || !ip4_addr_netmask_valid((uint32_t)out.mask)) return T(CS_MASK);
+  if (!sameNet(out.ip, out.gw, out.mask)) return T(CS_SAME_NET);
+  if (out.ip == out.gw) return T(CS_IP_IS_GW);
   // The router network must not overlap the AP network, or replies to AP clients get misrouted
   if (inApSubnet(out.ip) || inApSubnet(out.gw) || sameNet(AP_IP, out.ip, out.mask))
-    return "Мережа роутера перекривається з мережею точки (" + AP_IP.toString() + "), буде конфлікт.";
+    return T(CS_OVERLAP) + AP_IP.toString() + T(CS_OVERLAP2);
   return "";
 }
 
@@ -69,6 +68,8 @@ void load() {
   s.staPass = prefs.getString(K_STA_PASS, "");
   s.webPass = prefs.getString(K_WEB_PASS, "");
   s.st.on   = prefs.getBool(K_ST_ON, false);
+  s.lang    = prefs.getUChar(K_LANG, 0) == 1 ? I18n::Lang::EN : I18n::Lang::UK;
+  I18n::setLang(s.lang);
   String err = checkStatic(prefs.getString(K_ST_IP, ""), prefs.getString(K_ST_MASK, "255.255.255.0"),
                            prefs.getString(K_ST_GW, ""), s.st);
   prefs.end();
@@ -110,6 +111,7 @@ void save() {
   prefs.putBool(K_DNS_ON, dns.enabled());
   prefs.putBool(K_GUARD_ON, AntiBypass::enabled());
   prefs.putBool(K_GUARD_DOH, AntiBypass::blockDohIps());
+  prefs.putUChar(K_LANG, (uint8_t)s.lang);
   prefs.end();
 }
 

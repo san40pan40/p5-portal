@@ -6,6 +6,7 @@
  */
 #include <Arduino.h>
 #include <IPAddress.h>
+#include "i18n.h"
 
 namespace Config {
 
@@ -29,6 +30,7 @@ struct Settings {
   String   staSsid, staPass;  // home Wi-Fi (uplink); empty SSID = do not connect
   String   webPass;           // web panel password (login "admin"); empty = no password
   StaticIp st;
+  I18n::Lang lang = I18n::Lang::UK;   // web panel language
 };
 
 extern Settings settings;

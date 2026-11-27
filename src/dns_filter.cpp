@@ -1,5 +1,6 @@
 #include "dns_filter.h"
 #include "anti_bypass.h"      // AntiBypass::enabled() — whether the DoH list and the canary apply
+#include "i18n.h"             // translated reasons for a rejected upstream
 #include <esp_random.h>
 #include <iterator>           // std::size
 #include <lwip/prot/dns.h>    // DNS constants from lwIP: SIZEOF_DNS_HDR, DNS_RRTYPE_A, ...
@@ -56,10 +57,10 @@ void DnsFilter::begin(IPAddress apIp, IPAddress apMask) {
 // This is the ONLY place with these rules: setUpstream and setStaAddrs guarantee that
 // _upstream is never forbidden, so forwarding does not re-check it.
 const char *DnsFilter::forbiddenUpstream(IPAddress ip) const {
-  if (ip[0] == 0 || ip[0] == 127 || ip[0] >= 224) return "службова адреса (0.0.0.0, 127.x, multicast чи broadcast)";
-  if (((uint32_t)ip & (uint32_t)_apMask) == ((uint32_t)_apIp & (uint32_t)_apMask)) return "це мережа нашої точки доступу";
-  if ((uint32_t)_staSelf && ip == _staSelf) return "це сама плата — запити ганятимуть по колу";
-  if ((uint32_t)_staGw && ip == _staGw) return "це роутер: якщо він питає DNS у плати, запити ганятимуть по колу";
+  if (ip[0] == 0 || ip[0] == 127 || ip[0] >= 224) return T(UP_SPECIAL);
+  if (((uint32_t)ip & (uint32_t)_apMask) == ((uint32_t)_apIp & (uint32_t)_apMask)) return T(UP_AP_NET);
+  if ((uint32_t)_staSelf && ip == _staSelf) return T(UP_SELF);
+  if ((uint32_t)_staGw && ip == _staGw) return T(UP_ROUTER);
   return nullptr;
 }
 

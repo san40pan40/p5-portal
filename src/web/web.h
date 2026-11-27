@@ -9,6 +9,7 @@
 #include <Arduino.h>
 #include "app.h"
 #include "rule_list.h"
+#include "i18n.h"
 
 namespace Web {
 
@@ -68,7 +69,8 @@ void ruleTable(String &p, const RuleList &l, const char *page, const char *delAc
   String q = server.arg("q");
   q.toLowerCase();
   p += "<form method=GET action='" + String(page) + "#list' class=row style='margin-bottom:.6em'>"
-       "<input name=q value='" + esc(q) + "' placeholder='пошук по списку'><button class='g s'>Знайти</button></form>";
+       "<input name=q value='" + esc(q) + "' placeholder='" + T(LIST_SEARCH) + "'><button class='g s'>" +
+       T(LIST_FIND) + "</button></form>";
 
   size_t matched;
   size_t pg = server.arg("p").toInt();
@@ -83,10 +85,11 @@ void ruleTable(String &p, const RuleList &l, const char *page, const char *delAc
   if (pages > 1) {
     String base = String(page) + "?q=" + urlEncode(q) + "&p=";
     pager = "<div class=row style='margin:.5em 0'>";
-    if (pg > 0) pager += "<a class='btn g s' href='" + base + String(pg - 1) + "#list'>&lsaquo; Назад</a>";
-    pager += "<span class=hint>сторінка " + String(pg + 1) + " з " + String(pages) +
-             " &middot; правил: " + String(matched) + "</span>";
-    if (pg + 1 < pages) pager += "<a class='btn g s' href='" + base + String(pg + 1) + "#list'>Далі &rsaquo;</a>";
+    if (pg > 0) pager += "<a class='btn g s' href='" + base + String(pg - 1) + "#list'>" + T(LIST_PREV) + "</a>";
+    char info[96];
+    snprintf(info, sizeof(info), T(LIST_PAGE_FMT), (unsigned)(pg + 1), (unsigned)pages, (unsigned)matched);
+    pager += String("<span class=hint>") + info + "</span>";
+    if (pg + 1 < pages) pager += "<a class='btn g s' href='" + base + String(pg + 1) + "#list'>" + T(LIST_NEXT) + "</a>";
     pager += "</div>";
   }
 
@@ -94,10 +97,10 @@ void ruleTable(String &p, const RuleList &l, const char *page, const char *delAc
   for (const std::string *r : rules) {
     String rule(r->c_str());
     p += "<tr><td>" + esc(rule) + "</td><td style='text-align:right'>" +
-         postBtn(delAction, "Видалити", "g s", "domain", rule) + "</td></tr>";
+         postBtn(delAction, T(DELETE), "g s", "domain", rule) + "</td></tr>";
     flush();
   }
-  if (rules.empty()) p += "<tr><td class=mut>" + String(q.length() ? "нічого не знайдено" : "список порожній") + "</td></tr>";
+  if (rules.empty()) p += String("<tr><td class=mut>") + (q.length() ? T(LIST_NOTHING_FOUND) : T(LIST_EMPTY)) + "</td></tr>";
   p += "</table>" + pager;
 }
 
