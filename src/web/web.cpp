@@ -139,6 +139,25 @@ void sendPage(const char *title, const char *active, const String &body, int cod
   endPage(e);
 }
 
+String fetchErrText(const NetFetch::Status &st) {
+  using namespace NetFetch;
+  switch (st.err) {
+    case E_BUSY:     return T(FW_E_BUSY);
+    case E_HEAP:     return T(FW_E_HEAP) + String(st.code) + T(ST_KB);
+    case E_TASK:     return T(FW_E_TASK);
+    case E_CONNECT:  return T(FW_E_CONNECT) + String("(") + st.detail + ")";
+    case E_HTTP:     return T(FW_E_HTTP) + String(st.code);
+    case E_SIZE:     return T(FW_E_SIZE);
+    case E_TOO_BIG:  return T(FW_E_TOO_BIG) + String(st.code) + T(ST_KB) + T(FW_E_TOO_BIG_USB);
+    case E_TIMEOUT:  return T(FW_E_TIMEOUT);
+    case E_FLASH:    return T(FW_E_FLASH) + String(st.detail);
+    case E_SPACE:    return T(FW_E_SPACE) + String(st.code) + T(FW_E_SPACE_FREE) + st.detail + T(FW_E_SPACE_OFF);
+    case E_BAD_FILE: return T(FW_E_BAD_FILE);
+    case E_FS:       return T(FW_E_FS);
+    default:         return "";
+  }
+}
+
 void sendError(const String &msg, const char *back) {
   sendPage(T(ERROR_TITLE), "", String("<section class=card><h3>") + T(ERROR_TITLE) + "</h3><p class=bad>" + esc(msg) +
            "</p><div class=actions><a class='btn g' href='" + back + "'>" + T(BACK) + "</a></div></section>", 400);

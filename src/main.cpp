@@ -8,6 +8,7 @@
  *   app_board   — status LED and BOOT button (password reset)
  *   (the app_ prefix avoids clashes with framework headers: on Windows "network.h" == "Network.h")
  *   dns_filter  — DNS server with blocklists (rule_list) and the Firefox DoH canary
+ *   preset_lists — big downloaded blocklists (hashes on LittleFS), net_fetch downloads them
  *   anti_bypass — "Guard": drops attempts to bypass our DNS (ports 53/853, DoH)
  *   web/        — web panel pages
  */
@@ -19,6 +20,7 @@
 #include "app_board.h"
 #include "anti_bypass.h"
 #include "metrics.h"
+#include "preset_lists.h"
 #include "web/web.h"
 
 WebServer server(80);
@@ -38,6 +40,7 @@ void setup() {
 
   // DNS on port 53 (AP clients + home network); allowed queries go to the upstream resolver
   dns.loadLists();
+  PresetLists::begin();                     // downloaded blocklists (/bl), checked after the user's list
   dns.begin(Config::AP_IP, Config::AP_MASK);
   AntiBypass::begin(Config::AP_IP);         // frame hook for AP clients
   Config::loadDns();
@@ -55,5 +58,6 @@ void loop() {
   Board::loop();
   AntiBypass::loop();
   Metrics::loop();                          // chart samples every 10 s
+  PresetLists::loop();                      // list downloads + swap (never during a DNS lookup)
   delay(1);                                 // yield the CPU to other tasks (Wi-Fi, netcheck)
 }

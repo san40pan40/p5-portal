@@ -3,6 +3,7 @@
 #include "app_network.h"
 #include "app_config.h"
 #include "metrics.h"
+#include "preset_lists.h"
 
 namespace Web {
 
@@ -112,6 +113,31 @@ static void handleDns() {
        "</table><p class=hint>" + T(DNS_RULES_HINT) + "</p></details></section></div>";
   flush(true);
 
+  // ---- Preset lists: a switch per list; app.js polls /api/update while a list job runs (#bl[data-r]) ----
+  p += String("<section class=card id=bl") + (PresetLists::busy() ? " data-r=1" : "") + "><h3>" + T(BL_CARD) + "</h3>";
+  for (int i = 0; i < PresetLists::listCount(); i++) {
+    const PresetLists::Info l = PresetLists::info(i);
+    p += toggleRow(esc(l.name).c_str(), l.state != PresetLists::OFF, (String("/dns/bl?id=") + l.id).c_str());
+    p += "<p class=hint>";
+    if (!strncmp(l.homepage, "https://", 8)) p += "<a href='" + esc(l.homepage) + "' target=_blank rel=noopener>" + esc(l.license) + "</a>";
+    else p += esc(l.license);
+    if (l.count) p += String(" · ") + l.count + T(BL_DOMAINS);
+    if (l.bytes) p += String(" · ") + (l.bytes + 1023) / 1024 + T(ST_KB);
+    if (l.updated[0]) p += String(" · ") + T(BL_UPDATED) + esc(l.updated);
+    p += " ";
+    switch (l.state) {
+      case PresetLists::OFF:     break;
+      case PresetLists::QUEUED:  p += tag(T(BL_QUEUED), "warn"); break;
+      case PresetLists::LOADING: p += tag((String(T(BL_LOADING)) + "<b data-p>" + l.progress + "%</b>").c_str()); break;
+      case PresetLists::READY:   p += tag(T(BL_READY), "ok"); break;
+      case PresetLists::FAILED:  p += "<br><span class=bad>" + String(T(BL_FAILED)) + esc(fetchErrText(l.err)) + "</span>"; break;
+    }
+    p += "</p>";
+  }
+  p += String("<p class=hint>") + T(BL_FREE) + PresetLists::freeKb() + T(BL_OF) + PresetLists::totalKb() + T(ST_KB) +
+       ". " + T(BL_HINT) + "</p></section>";
+  flush(true);
+
   // ---- Recent queries ----
   p += String("<section class=card><h3>") + T(DNS_RECENT) + "</h3><div class=row>"
        "<input id=lf placeholder='" + T(DNS_LOG_FILTER) + "' oninput=lgf(0)>"
@@ -132,6 +158,9 @@ static void handleDns() {
       case RuleSource::Blocklist: p += postBtn("/dns/del", T(DNS_ALLOW_BTN), "gh s", "domain", e.rule); break;
       case RuleSource::Bypass:    p += postBtn("/bypass/del?back=/dns", T(DNS_ALLOW_BTN), "gh s", "domain", e.rule); break;
       case RuleSource::Canary:    p += tag("Firefox DoH"); break;   // switched off together with the Guard
+      case RuleSource::Preset:                    // no per-domain allowlist for presets yet
+        p += String("<span class=tag title='") + T(BL_NO_ALLOW) + "'>" + PresetLists::id(e.list) + "</span>";
+        break;
     }
     p += "</td></tr>";
     flush();
@@ -162,6 +191,21 @@ static void handleToggle() {
   finishToggle("/dns", dns.enabled(), T(DNS_TURNED_ON), T(DNS_TURNED_OFF));
 }
 
+// Switch of a preset list: on queues the download (refused when it cannot fit), off deletes the file
+static void handleList() {
+  const int i = PresetLists::find(server.arg("id").c_str());
+  if (i < 0) return sendError(T(BL_UNKNOWN), "/dns");
+  const bool on = PresetLists::info(i).state == PresetLists::OFF;
+  if (uint32_t need = PresetLists::setEnabled(i, on)) {
+    NetFetch::Status st;
+    st.err = NetFetch::E_SPACE;
+    st.code = need;
+    snprintf(st.detail, sizeof(st.detail), "%u", (unsigned)PresetLists::freeKb());
+    return sendError(fetchErrText(st), "/dns");
+  }
+  redirectMsg("/dns", on ? T(BL_ON) : T(BL_OFF));
+}
+
 static void handleUpstream() {
   IPAddress ip;
   if (!ip.fromString(server.arg("up"))) return sendError(T(DNS_UP_BAD_FORMAT), "/dns");
@@ -180,6 +224,7 @@ void registerDnsPage() {
   routeUpload("/dns/import", handleImportDone, handleImport);
   route("/dns/toggle",   HTTP_POST, handleToggle);
   route("/dns/upstream", HTTP_POST, handleUpstream);
+  route("/dns/bl",       HTTP_POST, handleList);
 }
 
 }  // namespace Web

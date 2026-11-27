@@ -132,21 +132,6 @@ static void netsCard(String &b) {
 // ---------------------------------------------------------------- online update (GitHub releases)
 // NetFetch runs the HTTPS job in its own task; the page shows its status, app.js polls /api/update
 // while a job runs (#fw[data-r]) and reloads when it ends. #fwr (installed) is submitted by app.js.
-static String fwErrText(const NetFetch::Status &st) {
-  using namespace NetFetch;
-  switch (st.err) {
-    case E_BUSY:    return T(FW_E_BUSY);
-    case E_HEAP:    return T(FW_E_HEAP) + String(st.code) + T(ST_KB);
-    case E_TASK:    return T(FW_E_TASK);
-    case E_CONNECT: return T(FW_E_CONNECT) + String("(") + st.detail + ")";
-    case E_HTTP:    return T(FW_E_HTTP) + String(st.code);
-    case E_SIZE:    return T(FW_E_SIZE);
-    case E_TOO_BIG: return T(FW_E_TOO_BIG) + String(st.code) + T(ST_KB) + T(FW_E_TOO_BIG_USB);
-    case E_TIMEOUT: return T(FW_E_TIMEOUT);
-    case E_FLASH:   return T(FW_E_FLASH) + String(st.detail);
-    default:        return "";
-  }
-}
 
 // Leading "v1.2.3" of a version; a suffix ("-dirty", "-3-gabc") is ignored.
 // false for anything without a tag ("4dc7444", "dev").
@@ -168,7 +153,8 @@ static int fwNewer(const char *latest) {
 
 static void fwBlock(String &b) {
   using namespace NetFetch;
-  const Status st = status();
+  Status st = status();
+  if (st.job >= JOB_LIST_INDEX) st = Status();   // a preset list job: shown on the DNS page
   const bool run = st.state == RUNNING, inst = st.job == JOB_FW_INSTALL;
   b += String("<div id=fw") + (run ? " data-r=1>" : ">");
   if (run && inst) {
@@ -188,7 +174,7 @@ static void fwBlock(String &b) {
     if (nw == 1 || nw == -1)
       b += "<div class=actions>" + postBtn("/fw/install", T(FW_INSTALL_BTN), "", nullptr, "", T(FW_INSTALL_CONFIRM)) + "</div>";
   } else if (st.state == FAILED) {
-    b += String("<p class=bad>") + esc(inst ? T(OTA_FAIL) + fwErrText(st) + T(OTA_OLD_RUNS) : T(FW_CHECK_FAIL) + fwErrText(st)) + "</p>";
+    b += String("<p class=bad>") + esc(inst ? T(OTA_FAIL) + fetchErrText(st) + T(OTA_OLD_RUNS) : T(FW_CHECK_FAIL) + fetchErrText(st)) + "</p>";
   }
   b += "</div>";
 }
@@ -207,7 +193,7 @@ static void handleApiUpdate() {
   using namespace NetFetch;
   const Status st = status();
   static const char *const STATE[] = {"idle", "run", "done", "fail"};
-  String err = st.state == FAILED ? fwErrText(st) : String();
+  String err = st.state == FAILED ? fetchErrText(st) : String();
   err.replace("\\", "\\\\");
   err.replace("\"", "\\\"");
   String j = String("{\"state\":\"") + STATE[st.state] + "\",\"job\":\"" +

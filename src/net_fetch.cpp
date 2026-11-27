@@ -5,12 +5,20 @@
 #include <Update.h>
 #include <esp_ota_ops.h>
 #include <esp_heap_caps.h>
+#include <LittleFS.h>
+#include <esp_rom_crc.h>
 #include "app_board.h"
+#include "preset_lists.h"
 #include "version_gen.h"
 
 namespace NetFetch {
 
 static const char    *URL_LATEST = "https://github.com/san40pan40/p5-portal/releases/latest";
+// Preset blocklists (GitHub release "lists"). Override for a local test server:
+// -DP5_LISTS_BASE=\"http://192.168.50.x:8000/\" (plain http works there too)
+#ifndef P5_LISTS_BASE
+#define P5_LISTS_BASE "https://github.com/san40pan40/p5-portal/releases/download/lists/"
+#endif
 static const char    *URL_FW     = "https://github.com/san40pan40/p5-portal/releases/latest/download/firmware.bin";
 static const uint32_t TIMEOUT_MS = 10000;
 static const size_t   MIN_HEAP   = 60 * 1024;  // TLS needs ~45-55 KB of internal RAM in one piece
@@ -39,7 +47,7 @@ static void httpFail(int code) {
 
 // GitHub answers /releases/latest with a redirect to .../releases/tag/<tag>, or to .../releases
 // when there are no releases. Only the Location header is read: no API, no rate limit.
-static void runCheck(NetworkClientSecure &c, HTTPClient &h) {
+static void runCheck(NetworkClient &c, HTTPClient &h) {
   h.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
   if (!h.begin(c, URL_LATEST)) return finish(FAILED, E_CONNECT);
   int code = h.GET();
@@ -57,9 +65,38 @@ static void runCheck(NetworkClientSecure &c, HTTPClient &h) {
   finish(DONE);
 }
 
+// Reads a body of len bytes from h in chunks of up to 1 KB into sink, updating s.progress.
+// Stops on a sink error (E_FLASH), a stalled or closed connection (E_TIMEOUT). got = bytes read.
+static Err pump(HTTPClient &h, int len, bool (*sink)(const uint8_t *, size_t), int &got) {
+  uint8_t *buf = (uint8_t *)malloc(1024);
+  NetworkClient *st = h.getStreamPtr();
+  Err e = buf ? E_NONE : E_FLASH;
+  uint32_t last = millis();
+  got = 0;
+  while (e == E_NONE && got < len) {
+    int a = st->available();
+    int r = a > 0 ? st->read(buf, a < 1024 ? a : 1024) : 0;
+    if (r > 0) {
+      if (!sink(buf, r)) e = E_FLASH;
+      got += r;
+      last = millis();
+      s.progress = (uint64_t)got * 100 / len;
+      delay(1);                                  // yield: let the web/DNS loop and IDLE run
+    } else if (!st->connected() || millis() - last > TIMEOUT_MS) {
+      e = E_TIMEOUT;                             // nothing read: stalled or closed — never spin forever
+    } else {
+      delay(2);
+    }
+  }
+  free(buf);
+  return e;
+}
+
+static bool fwSink(const uint8_t *b, size_t n) { return Update.write((uint8_t *)b, n) == n; }
+
 // Download the release asset (GitHub redirects to its asset CDN) straight into the OTA partition.
 // Update.end(true) verifies the image; on any failure the running firmware stays the boot one.
-static void runInstall(NetworkClientSecure &c, HTTPClient &h) {
+static void runInstall(NetworkClient &c, HTTPClient &h) {
   h.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
   if (!h.begin(c, URL_FW)) return finish(FAILED, E_CONNECT);
   int code = h.GET();
@@ -72,27 +109,8 @@ static void runInstall(NetworkClientSecure &c, HTTPClient &h) {
 
   Board::setLed(30, 0, 40);                      // purple: update in progress
   if (!Update.begin(len)) return finish(FAILED, E_FLASH, 0, Update.errorString());
-  uint8_t *buf = (uint8_t *)malloc(1024);
-  NetworkClient *st = h.getStreamPtr();
-  Err e = buf ? E_NONE : E_FLASH;
-  int got = 0;
-  uint32_t last = millis();
-  while (e == E_NONE && got < len) {
-    int a = st->available();
-    int r = a > 0 ? st->read(buf, a < 1024 ? a : 1024) : 0;
-    if (r > 0) {
-      if (Update.write(buf, r) != (size_t)r) e = E_FLASH;
-      got += r;
-      last = millis();
-      s.progress = (uint32_t)got * 100 / len;
-      delay(1);                                  // yield: let the web/DNS loop and IDLE run
-    } else if (!st->connected() || millis() - last > TIMEOUT_MS) {
-      e = E_TIMEOUT;                             // nothing read: stalled or closed — never spin forever
-    } else {
-      delay(2);
-    }
-  }
-  free(buf);
+  int got;
+  Err e = pump(h, len, fwSink, got);
   if (e == E_NONE && !Update.end(true)) e = E_FLASH;
   if (e != E_NONE) {
     String err = Update.errorString();           // read before abort() resets it
@@ -104,17 +122,78 @@ static void runInstall(NetworkClientSecure &c, HTTPClient &h) {
   finish(DONE);                                  // the web layer offers the restart; LED stays purple
 }
 
+// ---- preset blocklists: index.json -> /bl/index.json, <id>.bin -> /bl/<id>.tmp (verified)
+static File     s_file;
+static uint32_t s_crc;
+static uint8_t  s_hdr[PresetLists::HDR_SIZE];
+static size_t   s_hdrN;
+
+static bool listSink(const uint8_t *b, size_t n) {
+  size_t i = 0;
+  while (s_hdrN < sizeof(s_hdr) && i < n) s_hdr[s_hdrN++] = b[i++];
+  if (i < n) s_crc = esp_rom_crc32_le(s_crc, b + i, n - i);   // same as zlib.crc32 of the payload
+  return s_file.write(b, n) == n;
+}
+
+static void runList(NetworkClient &c, HTTPClient &h) {
+  const bool idx = s.job == JOB_LIST_INDEX;
+  char url[160], path[40];
+  if (idx) {
+    snprintf(url, sizeof(url), "%sindex.json", P5_LISTS_BASE);
+    strlcpy(path, "/bl/index.tmp", sizeof(path));   // replaces /bl/index.json when complete
+  } else {
+    snprintf(url, sizeof(url), "%s%s.bin", P5_LISTS_BASE, s.arg);
+    snprintf(path, sizeof(path), "/bl/%s.tmp", s.arg);
+  }
+  h.setFollowRedirects(HTTPC_FORCE_FOLLOW_REDIRECTS);
+  if (!h.begin(c, url)) return finish(FAILED, E_CONNECT);
+  int code = h.GET();
+  if (code != 200) return httpFail(code);
+  const int len = h.getSize();
+  if (len <= (idx ? 0 : (int)PresetLists::HDR_SIZE)) return finish(FAILED, E_SIZE);
+  if (idx && len > 8192) return finish(FAILED, E_BAD_FILE);
+  LittleFS.remove(path);                         // a leftover of a failed attempt
+  const uint32_t freeKb = PresetLists::freeKb(), needKb = (len + 1023) / 1024;
+  if (needKb > freeKb) {
+    char d[12];
+    snprintf(d, sizeof(d), "%u", (unsigned)freeKb);
+    return finish(FAILED, E_SPACE, needKb, d);
+  }
+  s_file = LittleFS.open(path, "w");
+  if (!s_file) return finish(FAILED, E_FS);
+  s_crc = 0;
+  s_hdrN = 0;
+  int got;
+  Err e = pump(h, len, listSink, got);
+  s_file.close();
+  if (e == E_FLASH) e = E_FS;
+  uint32_t cnt, crc;
+  if (e == E_NONE && !idx && (!PresetLists::validHeader(s_hdr, got, cnt, crc) || crc != s_crc)) e = E_BAD_FILE;
+  if (e != E_NONE) {
+    LittleFS.remove(path);
+    return finish(FAILED, e);
+  }
+  if (idx) {
+    LittleFS.remove("/bl/index.json");
+    LittleFS.rename(path, "/bl/index.json");
+  }
+  Serial.printf("[FETCH] %s: %d bytes\n", path, got);
+  finish(DONE);
+}
+
 static void task(void *) {
   {
     NetworkClientSecure c;
+    NetworkClient plain;                         // only for a test server (P5_LISTS_BASE = http://...)
     c.useBuiltinCACertBundle();
     c.setHandshakeTimeout(TIMEOUT_MS / 1000);    // seconds
     HTTPClient h;
     h.setUserAgent("P5-Portal/" FW_VERSION);
     h.setConnectTimeout(TIMEOUT_MS);
     h.setTimeout(TIMEOUT_MS);
-    if (s.job == JOB_FW_CHECK) runCheck(c, h);
-    else                       runInstall(c, h);
+    if (s.job == JOB_FW_CHECK)        runCheck(c, h);
+    else if (s.job == JOB_FW_INSTALL) runInstall(c, h);
+    else runList(strncmp(P5_LISTS_BASE, "http:", 5) ? (NetworkClient &)c : plain, h);
     h.end();
   }                                              // TLS context freed here
   Serial.printf("[FETCH] done, stack left %u B, heap %u B\n", (unsigned)uxTaskGetStackHighWaterMark(NULL),
@@ -123,7 +202,7 @@ static void task(void *) {
   vTaskDelete(NULL);
 }
 
-Err start(Job job) {
+Err start(Job job, const char *arg) {
   bool expected = false;
   if (!s_busy.compare_exchange_strong(expected, true)) return E_BUSY;
   if (Update.isRunning()) { s_busy = false; return E_BUSY; }    // a file OTA upload is in progress
@@ -131,6 +210,7 @@ Err start(Job job) {
   Status n;                                       // fresh status; an install keeps the tag it installs
   if (job == JOB_FW_INSTALL) strlcpy(n.latest, s.latest, sizeof(n.latest));
   n.job = job;
+  strlcpy(n.arg, arg, sizeof(n.arg));
   s = n;
   if (blk < MIN_HEAP) {
     finish(FAILED, E_HEAP, blk / 1024);

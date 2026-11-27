@@ -4,15 +4,16 @@
  * running while a TLS session is open. One job (one TLS session) at a time; the task is
  * created per job and deletes itself when done. CA check: the built-in Mozilla bundle.
  *
- * Jobs: firmware version check (GitHub "latest release" redirect) and firmware install
- * (release asset firmware.bin -> Update). Later: list downloads (same task, new Job value).
+ * Jobs: firmware version check (GitHub "latest release" redirect), firmware install
+ * (release asset firmware.bin -> Update), preset blocklists (release "lists": index.json, <id>.bin
+ * -> LittleFS /bl/, the .bin goes to /bl/<id>.tmp and is verified; PresetLists swaps it in).
  * The web layer starts a job and polls status(); texts for errors live in the web layer (i18n).
  */
 #include <Arduino.h>
 
 namespace NetFetch {
 
-enum Job : uint8_t { JOB_NONE, JOB_FW_CHECK, JOB_FW_INSTALL };
+enum Job : uint8_t { JOB_NONE, JOB_FW_CHECK, JOB_FW_INSTALL, JOB_LIST_INDEX, JOB_LIST_FETCH };
 enum State : uint8_t { IDLE, RUNNING, DONE, FAILED };
 enum Err : uint8_t {
   E_NONE,
@@ -25,19 +26,23 @@ enum Err : uint8_t {
   E_TOO_BIG,   // the file does not fit the OTA partition (code = size, KB)
   E_TIMEOUT,   // download stalled or the connection dropped
   E_FLASH,     // Update error (detail = Update.errorString())
+  E_SPACE,     // the list does not fit LittleFS (code = needed KB, detail = free KB)
+  E_BAD_FILE,  // downloaded list: bad header, length or crc
+  E_FS,        // could not write the file
 };
 
 struct Status {
   Job     job      = JOB_NONE;
   State   state    = IDLE;
   Err     err      = E_NONE;
-  uint8_t progress = 0;        // install: 0..100
+  uint8_t progress = 0;        // install / list download: 0..100
   int     code     = 0;        // see Err
   char    latest[40] = "";     // check: latest release tag, "" = no releases yet
   char    detail[48] = "";
+  char    arg[24]    = "";     // list download: list id
 };
 
-Err    start(Job job);   // E_NONE = started; otherwise the reason (nothing started)
+Err    start(Job job, const char *arg = "");   // E_NONE = started; otherwise the reason (nothing started)
 bool   busy();
 Status status();         // snapshot; text fields are final once state != RUNNING
 

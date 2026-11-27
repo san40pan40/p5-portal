@@ -10,6 +10,7 @@
  * Two rule lists (see rule_list.h):
  *   blocklist  — the user's blocklist (/blocklist.txt)
  *   bypassList — DoH/DoT servers for the Guard (/doh.txt), active only while the Guard is on
+ * then the preset lists (preset_lists.h), checked after the user's blocklist.
  * Plus the Firefox canary (use-application-dns.net -> NXDOMAIN), which makes Firefox turn off its own DoH.
  */
 #include <Arduino.h>
@@ -18,12 +19,13 @@
 #include "ring.h"
 
 // Which list matched (for the log and the buttons on the page)
-enum class RuleSource : uint8_t { None, Blocklist, Bypass, Canary };
+enum class RuleSource : uint8_t { None, Blocklist, Bypass, Canary, Preset };
 
 struct DnsLogEntry {
   String     domain;
   String     rule;      // matching rule ("" = allowed)
   RuleSource src;
+  uint8_t    list;      // Preset: index in PresetLists
   IPAddress  client;    // who asked
   uint32_t   ms;        // millis() of the query
 };
@@ -76,7 +78,7 @@ private:
   void sendHeaderOnly(IPAddress ip, uint16_t port, uint8_t rcode);
   void forward(int len, int qEnd, uint16_t qtype, IPAddress ip, uint16_t port);
   Pending *findPending(uint16_t id);
-  void addLog(const char *domain, const std::string *rule, RuleSource src, IPAddress ip);
+  void addLog(const char *domain, const char *rule, RuleSource src, IPAddress ip, uint8_t list);
 
   WiFiUDP   _srv;                                 // client socket (port 53)
   WiFiUDP   _up;                                  // upstream socket

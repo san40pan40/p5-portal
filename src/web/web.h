@@ -10,6 +10,7 @@
 #include "app.h"
 #include "rule_list.h"
 #include "i18n.h"
+#include "net_fetch.h"
 
 namespace Web {
 
@@ -39,6 +40,7 @@ void endPage(String &p);
 void sendPage(const char *title, const char *active, const String &body, int code = 200,
               const char *extraHead = "");
 void sendError(const String &msg, const char *back);
+String fetchErrText(const NetFetch::Status &st);   // why a NetFetch job failed (firmware or list)
 // Reply, then reboot. apSsid set: the AP name/password changed — tell the user to reconnect to it.
 void sendRestartPage(const char *heading, const String &apSsid = "");
 void redirectMsg(const char *url, const String &msg);      // 303 + green note on the next page

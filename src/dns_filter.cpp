@@ -2,6 +2,7 @@
 #include "anti_bypass.h"      // AntiBypass::enabled() — whether the DoH list and the canary apply
 #include "i18n.h"             // translated reasons for a rejected upstream
 #include "metrics.h"          // charts history + top tables
+#include "preset_lists.h"     // big downloaded blocklists, checked after the user's list
 #include <esp_random.h>
 #include <iterator>           // std::size
 #include <lwip/prot/dns.h>    // DNS constants from lwIP: SIZEOF_DNS_HDR, DNS_RRTYPE_A, ...
@@ -148,6 +149,9 @@ void DnsFilter::handleQuery(int len, IPAddress ip, uint16_t port) {
 
   statTotal++;
   const std::string *rule = nullptr;
+  const char *ruleTxt = nullptr;                 // for the log: rule text, or the matching suffix of a preset
+  int list = -1;
+  size_t sfx = 0;
   RuleSource src = RuleSource::None;
   uint8_t rcode = RC_OK;
   if (_enabled) {
@@ -161,12 +165,16 @@ void DnsFilter::handleQuery(int len, IPAddress ip, uint16_t port) {
       src = RuleSource::Bypass;                  // DoH/DoT server
     } else if ((rule = _block.match(name, n))) {
       src = RuleSource::Blocklist;               // user blocklist
+    } else if ((list = PresetLists::match(name, n, sfx)) >= 0) {
+      src = RuleSource::Preset;                  // downloaded preset list
+      ruleTxt = name + sfx;
     }
   }
-  addLog(name, rule, src, ip);
-  Metrics::dnsQuery((uint32_t)ip, rule ? name : nullptr);
+  if (rule) ruleTxt = rule->c_str();
+  addLog(name, ruleTxt, src, ip, list < 0 ? 0 : list);
+  Metrics::dnsQuery((uint32_t)ip, ruleTxt ? name : nullptr);
 
-  if (rule) {
+  if (ruleTxt) {
     statBlocked++;
     sendReply(qEnd, qtype, ip, port, rcode);
   } else {
@@ -290,11 +298,12 @@ void DnsFilter::handleUpstreamReply(int len, IPAddress from) {
 }
 
 // ================================================================ log
-void DnsFilter::addLog(const char *domain, const std::string *rule, RuleSource src, IPAddress ip) {
+void DnsFilter::addLog(const char *domain, const char *rule, RuleSource src, IPAddress ip, uint8_t list) {
   DnsLogEntry &e = _log.next();                  // filled in place: strings reuse their memory
   e.domain = domain;
-  e.rule   = rule ? rule->c_str() : "";
+  e.rule   = rule ? rule : "";
   e.src    = src;
+  e.list   = list;
   e.client = ip;
   e.ms     = millis();
 }
