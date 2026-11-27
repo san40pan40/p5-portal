@@ -136,16 +136,25 @@ void RuleList::importBegin(bool replace) {
   _impLine.clear();
   _impAdded = _impSkipped = 0;
   _impLong = false;
+  _impFirst = true;
   _impReplace = replace;
   _full = false;
+}
+
+// One complete line of the upload; a UTF-8 BOM at the very start of the file is dropped
+void RuleList::importLine() {
+  const char *p = _impLine.c_str();
+  if (_impFirst && !strncmp(p, "\xEF\xBB\xBF", 3)) p += 3;
+  _impFirst = false;
+  if (_impLong) _impSkipped++;
+  else addLine(String(p), _impAdded, _impSkipped);
 }
 
 void RuleList::importData(const uint8_t *buf, size_t len) {
   for (size_t i = 0; i < len && !_full; i++) {
     char c = (char)buf[i];
     if (c == '\n') {
-      if (_impLong) _impSkipped++;
-      else addLine(String(_impLine.c_str()), _impAdded, _impSkipped);
+      importLine();
       _impLine.clear();
       _impLong = false;
     } else if (_impLine.size() < IMPORT_LINE_MAX) {
@@ -157,12 +166,20 @@ void RuleList::importData(const uint8_t *buf, size_t len) {
 }
 
 bool RuleList::importEnd() {
-  if (_impLong) _impSkipped++;
-  else if (!_full && !_impLine.empty()) addLine(String(_impLine.c_str()), _impAdded, _impSkipped);
+  if (_impLong || (!_full && !_impLine.empty())) importLine();
   std::string().swap(_impLine);                  // give the buffer back
   _impReplace = false;
   if (_impAdded) save();
   return _impAdded > 0;
+}
+
+// The upload broke off: drop what was parsed (replace may have cleared the list) and reload the file
+void RuleList::importAbort() {
+  std::string().swap(_impLine);
+  _impReplace = false;
+  _impLong = false;
+  _impAdded = _impSkipped = 0;
+  load();
 }
 
 void RuleList::clearRules() {

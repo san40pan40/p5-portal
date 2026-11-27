@@ -141,26 +141,28 @@ static String fwErrText(const NetFetch::Status &st) {
     case E_CONNECT: return T(FW_E_CONNECT) + String("(") + st.detail + ")";
     case E_HTTP:    return T(FW_E_HTTP) + String(st.code);
     case E_SIZE:    return T(FW_E_SIZE);
-    case E_TOO_BIG: return T(FW_E_TOO_BIG) + String(st.code) + T(ST_KB);
+    case E_TOO_BIG: return T(FW_E_TOO_BIG) + String(st.code) + T(ST_KB) + T(FW_E_TOO_BIG_USB);
     case E_TIMEOUT: return T(FW_E_TIMEOUT);
     case E_FLASH:   return T(FW_E_FLASH) + String(st.detail);
     default:        return "";
   }
 }
 
-// "v1.2.3" -> true; anything else (e.g. "v1.2.3-4-gabc", "dev") is not a clean release tag
+// Leading "v1.2.3" of a version; a suffix ("-dirty", "-3-gabc") is ignored.
+// false for anything without a tag ("4dc7444", "dev").
 static bool parseVer(const char *v, unsigned (&n)[3]) {
   if (*v == 'v' || *v == 'V') v++;
   int used = 0;
-  return isdigit((unsigned char)*v) && sscanf(v, "%u.%u.%u%n", &n[0], &n[1], &n[2], &used) == 3 && !v[used];
+  if (!isdigit((unsigned char)*v) || sscanf(v, "%u.%u.%u%n", &n[0], &n[1], &n[2], &used) != 3) return false;
+  return !v[used] || v[used] == '-' || v[used] == '+';
 }
 
-// 1 = latest is newer, 0 = same or older, -1 = not comparable (install is offered anyway)
+// 1 = latest is newer, 0 = same, 2 = older, -1 = not comparable (install is offered anyway)
 static int fwNewer(const char *latest) {
   unsigned a[3], b[3];
   if (!parseVer(latest, a) || !parseVer(FW_VERSION, b)) return -1;
   for (int i = 0; i < 3; i++)
-    if (a[i] != b[i]) return a[i] > b[i];
+    if (a[i] != b[i]) return a[i] > b[i] ? 1 : 2;
   return 0;
 }
 
@@ -181,8 +183,9 @@ static void fwBlock(String &b) {
   } else if (st.state == DONE) {
     const int nw = fwNewer(st.latest);
     b += String("<p class=hint>") + T(FW_LATEST) + "<b>" + esc(st.latest) + "</b> " +
-         (nw == 1 ? tag(T(FW_NEWER), "warn") : nw == 0 ? tag(T(FW_UPTODATE), "ok") : String()) + "</p>";
-    if (nw != 0)
+         (nw == 1 ? tag(T(FW_NEWER), "warn") : nw == 0 ? tag(T(FW_UPTODATE), "ok")
+                  : nw == 2 ? tag(T(FW_OLDER), "ok") : String()) + "</p>";
+    if (nw == 1 || nw == -1)
       b += "<div class=actions>" + postBtn("/fw/install", T(FW_INSTALL_BTN), "", nullptr, "", T(FW_INSTALL_CONFIRM)) + "</div>";
   } else if (st.state == FAILED) {
     b += String("<p class=bad>") + esc(inst ? T(OTA_FAIL) + fwErrText(st) + T(OTA_OLD_RUNS) : T(FW_CHECK_FAIL) + fwErrText(st)) + "</p>";
@@ -340,19 +343,25 @@ static void handleSaveWeb() {
 // Access is checked BEFORE the first chunk is written, otherwise a foreign file could get flashed.
 static String s_otaError;
 static bool   s_otaAllowed = false;
+static bool   s_otaBegun = false;                 // THIS upload owns Update (the online fetch may use it too)
 
 static void handleUpdateUpload() {
   HTTPUpload &u = server.upload();
   if (u.status == UPLOAD_FILE_START) {
     s_otaError = "";
+    s_otaBegun = false;
     s_otaAllowed = accessOk();
     if (!s_otaAllowed) return;
     if (NetFetch::busy()) { s_otaError = T(FW_E_BUSY); return; }   // an online update may be writing
     Serial.printf("[OTA] start: %s\n", u.filename.c_str());
     Board::setLed(30, 0, 40);                     // purple: update in progress
     if (!Update.begin(UPDATE_SIZE_UNKNOWN)) s_otaError = Update.errorString();
+    else s_otaBegun = true;
   } else if (!s_otaAllowed || s_otaError.length()) {
-    if (u.status == UPLOAD_FILE_ABORTED) Update.abort();
+    if (u.status == UPLOAD_FILE_ABORTED || u.status == UPLOAD_FILE_END) {
+      if (s_otaBegun) Update.abort();             // never touch Update owned by the online fetch
+      s_otaBegun = false;
+    }
     return;                                       // rejected or already failed — ignore the rest
   } else if (u.status == UPLOAD_FILE_WRITE) {
     if (Update.write(u.buf, u.currentSize) != u.currentSize) s_otaError = Update.errorString();
@@ -361,8 +370,10 @@ static void handleUpdateUpload() {
     // end(true): verify the image and mark the new partition as the boot partition
     if (!Update.end(true)) s_otaError = Update.errorString();
     else Serial.printf("[OTA] written %u bytes\n", (unsigned)u.totalSize);
+    s_otaBegun = false;
   } else if (u.status == UPLOAD_FILE_ABORTED) {
     Update.abort();
+    s_otaBegun = false;
     s_otaError = T(OTA_ABORTED);
   }
 }

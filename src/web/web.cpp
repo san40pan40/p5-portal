@@ -314,7 +314,7 @@ void ruleExport(const RuleList &l, const char *name, const char *file) {
   server.sendContent("");
 }
 
-static bool s_impOk, s_impRan;                   // access checked at the start / a file was parsed
+static bool s_impOk, s_impRan, s_impAborted;     // access checked at the start / a file was parsed / it broke off
 void ruleImportUpload(RuleList &l) {
   HTTPUpload &u = server.upload();
   if (u.status == UPLOAD_FILE_START) {
@@ -327,7 +327,9 @@ void ruleImportUpload(RuleList &l) {
     l.importData(u.buf, u.currentSize);
     dns.loop();                                  // keep DNS running during the upload
   } else if (u.status == UPLOAD_FILE_END || u.status == UPLOAD_FILE_ABORTED) {
-    l.importEnd();
+    s_impAborted = u.status == UPLOAD_FILE_ABORTED;
+    if (s_impAborted) l.importAbort();           // a partial file must not replace the saved list
+    else l.importEnd();
     s_impOk = false;
     s_impRan = true;
   }
@@ -336,8 +338,11 @@ void ruleImportUpload(RuleList &l) {
 void ruleImportDone(RuleList &l, const char *page) {   // via routeUpload(): access already checked
   if (!s_impRan) return redirectMsg(page, T(RULES_NONE_ADDED));
   s_impRan = false;
+  if (s_impAborted) return redirectMsg(page, T(IMP_ABORTED));
   String m = T(IMP_ADDED) + String(l.importAdded()) + T(IMP_SKIPPED) + String(l.importSkipped());
   if (l.limitHit()) m += T(RULES_LIMIT);
+  if (l.importAdded() && l.truncated()) m += String(". ") + T(LIST_TRUNCATED);
+  else if (l.importAdded() && !l.lastSaveOk()) m += String(". ") + T(SAVE_FAILED);
   redirectMsg(page, m);
 }
 

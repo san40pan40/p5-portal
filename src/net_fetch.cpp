@@ -14,7 +14,7 @@ static const char    *URL_LATEST = "https://github.com/san40pan40/p5-portal/rele
 static const char    *URL_FW     = "https://github.com/san40pan40/p5-portal/releases/latest/download/firmware.bin";
 static const uint32_t TIMEOUT_MS = 10000;
 static const size_t   MIN_HEAP   = 60 * 1024;  // TLS needs ~45-55 KB of internal RAM in one piece
-static const uint32_t STACK      = 8192;
+static const uint32_t STACK      = 10240;      // TLS handshake is stack-hungry; ~2 KB margin over 8 KB
 
 // s is written by the job task while s_busy is set, read by the web layer (snapshot).
 // The task fills the text fields BEFORE it sets the final state.
@@ -79,15 +79,15 @@ static void runInstall(NetworkClientSecure &c, HTTPClient &h) {
   uint32_t last = millis();
   while (e == E_NONE && got < len) {
     int a = st->available();
-    if (a > 0) {
-      int r = st->read(buf, a < 1024 ? a : 1024);
-      if (r <= 0) continue;
+    int r = a > 0 ? st->read(buf, a < 1024 ? a : 1024) : 0;
+    if (r > 0) {
       if (Update.write(buf, r) != (size_t)r) e = E_FLASH;
       got += r;
       last = millis();
       s.progress = (uint32_t)got * 100 / len;
+      delay(1);                                  // yield: let the web/DNS loop and IDLE run
     } else if (!st->connected() || millis() - last > TIMEOUT_MS) {
-      e = E_TIMEOUT;
+      e = E_TIMEOUT;                             // nothing read: stalled or closed — never spin forever
     } else {
       delay(2);
     }

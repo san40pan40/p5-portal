@@ -53,6 +53,7 @@ X(IMP_HINT,           "Текстовий файл: домен на рядок, 
                       "A text file: one domain per line, hosts format (<code>0.0.0.0 site.com</code>) or AdBlock (<code>||site.com^</code>). Comment lines <code>#</code> and <code>!</code> are skipped.")
 X(IMP_ADDED,          "Імпорт: додано ", "Import: added ")
 X(IMP_SKIPPED,        ", пропущено ", ", skipped ")
+X(IMP_ABORTED,        "Імпорт перервано, список не змінено", "Import aborted, the list is unchanged")
 X(RULE_REMOVED,       "Видалено: ", "Removed: ")
 X(RULE_NOT_FOUND,     "Правило не знайдено", "Rule not found")
 X(LANG_CHANGED,       "Мову змінено", "Language changed")
@@ -289,6 +290,7 @@ X(FW_LATEST,          "Остання версія на GitHub: ", "Latest relea
 X(FW_NO_REL,          "На GitHub ще немає релізів", "No releases on GitHub yet")
 X(FW_NEWER,           "є оновлення", "update available")
 X(FW_UPTODATE,        "актуальна", "up to date")
+X(FW_OLDER,           "старіша за цю збірку", "older than this build")
 X(FW_INSTALL_BTN,     "Встановити", "Install")
 X(FW_INSTALL_CONFIRM, "Завантажити й встановити нову прошивку? Після цього плата перезавантажиться.",
                       "Download and install the new firmware? The board restarts afterwards.")
@@ -302,6 +304,8 @@ X(FW_E_CONNECT,       "немає з'єднання з GitHub ", "cannot connect
 X(FW_E_HTTP,          "відповідь сервера HTTP ", "server answered HTTP ")
 X(FW_E_SIZE,          "сервер не повідомив розмір файлу", "the server did not send the file size")
 X(FW_E_TOO_BIG,       "файл завеликий для розділу прошивки: ", "the file is too big for the firmware partition: ")
+X(FW_E_TOO_BIG_USB,   ". Плата має стару таблицю розділів (1,25 МБ) — один раз прошийте її через USB з новою таблицею розділів.",
+                      ". The board has the old partition table (1.25 MB) — reflash it once over USB with the new partition table.")
 X(FW_E_TIMEOUT,       "завантаження обірвалося", "the download stalled or was cut off")
 X(FW_E_FLASH,         "помилка запису: ", "write error: ")
 // History charts and top tables (Metrics)
