@@ -76,4 +76,4 @@ src/
 
 ## License
 
-Not chosen yet.
+[MIT](LICENSE) © 2026 san40pan40
